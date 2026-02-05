@@ -8,7 +8,13 @@ dotenv.config();
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://wergtest-enn.vercel.app',
+    'http://localhost:3000'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Routes
@@ -30,7 +36,7 @@ app.use('/api/settings', require('./routes/settings'));
 
 // MongoDB connection
 mongoose
-  .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/wergame')
+  .connect(process.env.MONGODB_URI || '')
   .then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
