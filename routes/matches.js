@@ -19,7 +19,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get match by ID
+// Get match by ID (includes contractOutcomes for frontend/contract alignment)
 router.get('/:id', async (req, res) => {
   try {
     const match = await Match.findById(req.params.id)
@@ -28,7 +28,10 @@ router.get('/:id', async (req, res) => {
     if (!match) {
       return res.status(404).json({ message: 'Match not found' });
     }
-    res.json(match);
+    const payload = match.toObject ? match.toObject() : { ...match };
+    // Canonical outcome options on the smart contract for this match (used for boost/market)
+    payload.contractOutcomes = ['TeamA', 'Draw', 'TeamB'];
+    res.json(payload);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -1,37 +1,71 @@
 const express = require('express');
 const { auth, isSuperAdmin } = require('../middleware/auth');
+const Settings = require('../models/Settings');
+const Match = require('../models/Match');
+const Poll = require('../models/Poll');
 
 const router = express.Router();
 
-// All superadmin routes require authentication and superAdmin role
-router.use(auth);
-router.use(isSuperAdmin);
-
-// Set fees (placeholder - will integrate with smart contract)
-router.post('/set-fees', async (req, res) => {
-  try {
-    const { platformFee, boostJackpotFee, marketPlatformFee, freeJackpotFee } = req.body;
-    // Store in database or call smart contract
-    res.json({ message: 'Fees set successfully', fees: req.body });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get fees
+// Get fees endpoint (public - fees should be visible to all users)
 router.get('/get-fees', async (req, res) => {
   try {
-    // Fetch from database or smart contract
+    const getFee = async (key, defaultValue) => {
+      const setting = await Settings.findOne({ key });
+      return setting ? (typeof setting.value === 'number' ? setting.value : parseFloat(setting.value) || defaultValue) : defaultValue;
+    };
+    
     res.json({
-      platformFee: 10,
-      boostJackpotFee: 10,
-      marketPlatformFee: 5,
-      freeJackpotFee: 5,
+      platformFee: await getFee('platformFee', 10),
+      boostJackpotFee: await getFee('boostJackpotFee', 5),
+      marketPlatformFee: await getFee('marketPlatformFee', 5),
+      freeJackpotFee: await getFee('freeJackpotFee', 5),
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
+
+// All other superadmin routes require authentication and superAdmin role
+router.use(auth);
+router.use(isSuperAdmin);
+
+// Set fees
+router.post('/set-fees', async (req, res) => {
+  try {
+    const { platformFee, boostJackpotFee, marketPlatformFee, freeJackpotFee } = req.body;
+    
+    // Validate fees are percentages (0-100)
+    if (platformFee < 0 || platformFee > 100 || boostJackpotFee < 0 || boostJackpotFee > 100 ||
+        marketPlatformFee < 0 || marketPlatformFee > 100 || freeJackpotFee < 0 || freeJackpotFee > 100) {
+      return res.status(400).json({ message: 'Fees must be between 0 and 100' });
+    }
+    
+    // Store fees in Settings
+    const feeSettings = [
+      { key: 'platformFee', value: platformFee, description: 'Platform fee percentage for boost predictions' },
+      { key: 'boostJackpotFee', value: boostJackpotFee, description: 'Boost jackpot fee percentage' },
+      { key: 'marketPlatformFee', value: marketPlatformFee, description: 'Platform fee percentage for market predictions' },
+      { key: 'freeJackpotFee', value: freeJackpotFee, description: 'Free jackpot fee percentage for market predictions' },
+    ];
+    
+    for (const feeSetting of feeSettings) {
+      let setting = await Settings.findOne({ key: feeSetting.key });
+      if (setting) {
+        setting.value = feeSetting.value;
+        setting.description = feeSetting.description;
+        await setting.save();
+      } else {
+        setting = new Settings(feeSetting);
+        await setting.save();
+      }
+    }
+    
+    res.json({ message: 'Fees set successfully', fees: { platformFee, boostJackpotFee, marketPlatformFee, freeJackpotFee } });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 
 // Get contract balance (placeholder)
 router.get('/contract-balance', async (req, res) => {
@@ -60,6 +94,36 @@ router.post('/set-superadmin', async (req, res) => {
     const { address } = req.body;
     // Update in smart contract
     res.json({ message: 'SuperAdmin address set successfully', address });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get matches with jackpot and fee data
+router.get('/matches', async (req, res) => {
+  try {
+    const matches = await Match.find()
+      .populate('cup', 'name slug')
+      .populate('stage', 'name')
+      .select('teamA teamB date status isResolved freeJackpotPool boostJackpotPool originalFreeJackpotPool originalBoostJackpotPool platformFees cup stage createdAt')
+      .sort({ createdAt: -1 });
+    
+    res.json(matches);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get polls with jackpot and fee data
+router.get('/polls', async (req, res) => {
+  try {
+    const polls = await Poll.find()
+      .populate('cup', 'name slug')
+      .populate('stage', 'name')
+      .select('question type status isResolved freeJackpotPool boostJackpotPool originalFreeJackpotPool originalBoostJackpotPool platformFees cup stage createdAt')
+      .sort({ createdAt: -1 });
+    
+    res.json(polls);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

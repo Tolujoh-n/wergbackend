@@ -4,9 +4,45 @@ const Match = require('../models/Match');
 const Poll = require('../models/Poll');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
+const Trade = require('../models/Trade');
 const { auth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Helper function to get fees from Settings
+async function getFees() {
+  const getFee = async (key, defaultValue) => {
+    const setting = await Settings.findOne({ key });
+    return setting ? (typeof setting.value === 'number' ? setting.value : parseFloat(setting.value) || defaultValue) : defaultValue;
+  };
+  
+  return {
+    platformFee: await getFee('platformFee', 10),
+    boostJackpotFee: await getFee('boostJackpotFee', 5),
+    marketPlatformFee: await getFee('marketPlatformFee', 5),
+    freeJackpotFee: await getFee('freeJackpotFee', 5),
+  };
+}
+
+/**
+ * Normalize match outcome to contract canonical form: TeamA, TeamB, or Draw.
+ * Accepts team names (e.g. "Poland"), "teamA"/"TeamA"/"TEAMA", etc.
+ * @param {string} outcome - Raw outcome from client
+ * @param {string} teamA - Match team A name
+ * @param {string} teamB - Match team B name
+ * @returns {string|null} 'TeamA' | 'TeamB' | 'Draw' or null if invalid
+ */
+function normalizeMatchOutcome(outcome, teamA, teamB) {
+  if (!outcome || typeof outcome !== 'string') return null;
+  const raw = String(outcome).trim();
+  const lower = raw.toLowerCase();
+  const teamALower = (teamA || '').trim().toLowerCase();
+  const teamBLower = (teamB || '').trim().toLowerCase();
+  if (lower === 'teama' || (teamALower && lower === teamALower)) return 'TeamA';
+  if (lower === 'teamb' || (teamBLower && lower === teamBLower)) return 'TeamB';
+  if (lower === 'draw') return 'Draw';
+  return null;
+}
 
 // Get all predictions for authenticated user
 router.get('/user', auth, async (req, res) => {
@@ -27,30 +63,17 @@ router.get('/user', auth, async (req, res) => {
 router.post('/free', auth, async (req, res) => {
   try {
     const { matchId, pollId, outcome } = req.body;
-    const user = await User.findById(req.user._id);
-
+    
     if (!matchId && !pollId) {
       return res.status(400).json({ message: 'Either matchId or pollId is required' });
     }
 
     // Get daily free play limit from settings
-    const settings = await Settings.findOne();
-    const dailyFreePlayLimit = settings?.freePlayLimit || 1;
+    const settings = await Settings.findOne({ key: 'dailyFreePlayLimit' });
+    const dailyFreePlayLimit = settings && settings.value ? parseInt(settings.value) : 1;
 
-    // Check if user has a ticket
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const lastTicketDate = user.lastTicketDate ? new Date(user.lastTicketDate) : null;
-
-    if (!lastTicketDate || lastTicketDate < today) {
-      // Give new tickets based on daily limit
-      user.tickets = dailyFreePlayLimit;
-      user.lastTicketDate = today;
-    }
-
-    if (user.tickets < 1) {
-      return res.status(400).json({ message: `No tickets available. You can make ${dailyFreePlayLimit} free prediction(s) per day. Come back tomorrow!` });
-    }
+    // Fetch user and check/update tickets
+    const user = await User.findById(req.user._id);
 
     // Check if user already predicted
     const query = {
@@ -62,7 +85,7 @@ router.post('/free', auth, async (req, res) => {
 
     const existingPrediction = await Prediction.findOne(query);
 
-    // If prediction exists and item is still upcoming, allow update
+    // If prediction exists and item is still upcoming, allow update (no ticket needed)
     if (existingPrediction) {
       let item = null;
       if (matchId) {
@@ -72,7 +95,7 @@ router.post('/free', auth, async (req, res) => {
       }
       
       if (item && (item.status === 'upcoming' || item.status === 'active')) {
-        // Update existing prediction
+        // Update existing prediction (no ticket deduction)
         existingPrediction.outcome = outcome;
         existingPrediction.updatedAt = new Date();
         await existingPrediction.save();
@@ -82,8 +105,74 @@ router.post('/free', auth, async (req, res) => {
       return res.status(400).json({ message: 'You already predicted this item' });
     }
 
+    // For new predictions, check tickets
+    // Check if user has a ticket - tickets are shared across all cups per day
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    today.setMinutes(0, 0, 0);
+    today.setSeconds(0, 0);
+    today.setMilliseconds(0);
+    
+    // Re-fetch user to get latest data
+    let currentUser = await User.findById(req.user._id);
+    
+    const lastTicketDate = currentUser.lastTicketDate ? new Date(currentUser.lastTicketDate) : null;
+    let lastTicketDateNormalized = null;
+    if (lastTicketDate) {
+      lastTicketDateNormalized = new Date(lastTicketDate);
+      lastTicketDateNormalized.setHours(0, 0, 0, 0);
+      lastTicketDateNormalized.setMinutes(0, 0, 0);
+      lastTicketDateNormalized.setSeconds(0, 0);
+      lastTicketDateNormalized.setMilliseconds(0);
+    }
+
+    // Check if we need to reset tickets
+    const isNewDay = !lastTicketDateNormalized || lastTicketDateNormalized.getTime() < today.getTime();
+    const hasInvalidTickets = currentUser.tickets === null || 
+                              currentUser.tickets === undefined || 
+                              isNaN(currentUser.tickets);
+    // Also reset if tickets are 0 and it's a new day (edge case handling)
+    const hasZeroTickets = currentUser.tickets === 0;
+    const needsReset = isNewDay || hasInvalidTickets || (hasZeroTickets && isNewDay);
+
+    console.log(`[FREE PREDICTION] User ${currentUser._id} - Current tickets: ${currentUser.tickets}, Last ticket date: ${currentUser.lastTicketDate}, Daily limit: ${dailyFreePlayLimit}`);
+    console.log(`[FREE PREDICTION] Is new day: ${isNewDay}, Has invalid tickets: ${hasInvalidTickets}, Has zero tickets: ${hasZeroTickets}, Needs reset: ${needsReset}`);
+    console.log(`[FREE PREDICTION] Today: ${today.toISOString()}, Last date: ${lastTicketDateNormalized ? lastTicketDateNormalized.toISOString() : 'null'}`);
+
+    // Reset tickets if needed
+    if (needsReset) {
+      // Give new tickets based on daily limit
+      currentUser.tickets = dailyFreePlayLimit;
+      currentUser.lastTicketDate = today;
+      await currentUser.save(); // Save immediately to ensure tickets are updated
+      console.log(`[FREE PREDICTION] Tickets reset for user ${currentUser._id}. New tickets: ${dailyFreePlayLimit}`);
+      
+      // Re-fetch to confirm the save
+      currentUser = await User.findById(req.user._id);
+      console.log(`[FREE PREDICTION] After reset - User ${currentUser._id} tickets: ${currentUser.tickets}`);
+    }
+
+    console.log(`[FREE PREDICTION] User ${currentUser._id} - Tickets available: ${currentUser.tickets || 0}, Daily limit: ${dailyFreePlayLimit}`);
+
+    // Final check: if tickets are still 0 or invalid after reset attempt, force reset
+    if ((!currentUser.tickets || currentUser.tickets < 1) && isNewDay) {
+      console.log(`[FREE PREDICTION] Force resetting tickets for user ${currentUser._id} - tickets were ${currentUser.tickets}`);
+      currentUser.tickets = dailyFreePlayLimit;
+      currentUser.lastTicketDate = today;
+      await currentUser.save();
+      currentUser = await User.findById(req.user._id);
+      console.log(`[FREE PREDICTION] After force reset - User ${currentUser._id} tickets: ${currentUser.tickets}`);
+    }
+
+    // Check if user has tickets available
+    const ticketsAvailable = currentUser.tickets && !isNaN(currentUser.tickets) && currentUser.tickets > 0;
+    if (!ticketsAvailable) {
+      console.log(`[FREE PREDICTION] No tickets available for user ${currentUser._id}. Current tickets: ${currentUser.tickets}, Type: ${typeof currentUser.tickets}`);
+      return res.status(400).json({ message: `No tickets available. You can make ${dailyFreePlayLimit} free prediction(s) per day. Come back tomorrow!` });
+    }
+
     const prediction = new Prediction({
-      user: user._id,
+      user: currentUser._id,
       match: matchId,
       poll: pollId,
       type: 'free',
@@ -92,10 +181,12 @@ router.post('/free', auth, async (req, res) => {
 
     await prediction.save();
 
-    // Deduct ticket
-    user.tickets -= 1;
-    user.totalPredictions += 1;
-    await user.save();
+    // Deduct ticket and update user
+    currentUser.tickets -= 1;
+    currentUser.totalPredictions += 1;
+    await currentUser.save();
+
+    console.log(`[FREE PREDICTION] Ticket deducted for user ${currentUser._id}. Remaining tickets: ${currentUser.tickets}`);
 
     res.status(201).json(prediction);
   } catch (error) {
@@ -129,6 +220,16 @@ router.post('/boost', auth, async (req, res) => {
       return res.status(400).json({ message: 'Item is locked or completed' });
     }
 
+    // Normalize outcome for matches to contract canonical form (TeamA, TeamB, Draw)
+    let outcomeToStore = outcome;
+    if (matchId && item.teamA != null && item.teamB != null) {
+      const normalized = normalizeMatchOutcome(outcome, item.teamA, item.teamB);
+      if (!normalized) {
+        return res.status(400).json({ message: 'Invalid outcome for match. Use Team A, Team B, or Draw.' });
+      }
+      outcomeToStore = normalized;
+    }
+
     // Check if user already has a boost prediction
     const query = {
       user: req.user._id,
@@ -137,13 +238,18 @@ router.post('/boost', auth, async (req, res) => {
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
 
+    // Persist wallet address so admin resolve can set claimable balance on-chain
+    if (req.body.walletAddress && String(req.body.walletAddress).trim()) {
+      await User.findByIdAndUpdate(req.user._id, { walletAddress: String(req.body.walletAddress).trim() });
+    }
+
     const existingBoostPrediction = await Prediction.findOne(query);
 
     // If prediction exists and item is still upcoming, allow update
     if (existingBoostPrediction) {
       if (item.status === 'upcoming' || item.status === 'active') {
-        // Update existing prediction
-        existingBoostPrediction.outcome = outcome;
+        // Update existing prediction with normalized outcome
+        existingBoostPrediction.outcome = outcomeToStore;
         existingBoostPrediction.updatedAt = new Date();
         await existingBoostPrediction.save();
         return res.json(existingBoostPrediction);
@@ -151,24 +257,37 @@ router.post('/boost', auth, async (req, res) => {
       return res.status(400).json({ message: 'You already have a boost prediction for this item' });
     }
 
+    // Get fees from settings
+    const fees = await getFees();
+    const stakeAmount = parseFloat(amount);
+    
+    // Calculate fees (percentages)
+    const platformFeeAmount = (stakeAmount * fees.platformFee) / 100;
+    const boostJackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
+    const netStakeAmount = stakeAmount - platformFeeAmount - boostJackpotFeeAmount;
+    
     const prediction = new Prediction({
       user: req.user._id,
       match: matchId,
       poll: pollId,
       type: 'boost',
-      outcome,
-      amount,
-      totalStake: amount, // Initialize total stake
+      outcome: outcomeToStore,
+      amount: netStakeAmount, // Store net amount after fees
+      totalStake: netStakeAmount, // Initialize total stake (net)
     });
 
     await prediction.save();
 
-    // Update boost pool
+    // Update boost pool with net amount (after fees)
     if (matchId) {
-      item.boostPool += amount;
+      item.boostPool = (item.boostPool || 0) + netStakeAmount;
+      item.boostJackpotPool = (item.boostJackpotPool || 0) + boostJackpotFeeAmount;
+      item.platformFees = (item.platformFees || 0) + platformFeeAmount;
       await item.save();
     } else {
-      item.boostPool = (item.boostPool || 0) + amount;
+      item.boostPool = (item.boostPool || 0) + netStakeAmount;
+      item.boostJackpotPool = (item.boostJackpotPool || 0) + boostJackpotFeeAmount;
+      item.platformFees = (item.platformFees || 0) + platformFeeAmount;
       await item.save();
     }
 
@@ -197,11 +316,19 @@ router.get('/match/:matchId/user', auth, async (req, res) => {
       query.type = type;
     }
     
+    // For market type, return all predictions (one per option)
+    if (type === 'market') {
+      const predictions = await Prediction.find(query)
+        .populate('match', 'teamA teamB date status result isResolved');
+      return res.json(predictions);
+    }
+    
     const prediction = await Prediction.findOne(query)
       .populate('match', 'teamA teamB date status result isResolved');
     
+    // Return null instead of 404 for better frontend handling
     if (!prediction) {
-      return res.status(404).json({ message: 'Prediction not found' });
+      return res.json(null);
     }
     res.json(prediction);
   } catch (error) {
@@ -223,11 +350,19 @@ router.get('/poll/:pollId/user', auth, async (req, res) => {
       query.type = type;
     }
     
+    // For market type, return all predictions (one per option)
+    if (type === 'market') {
+      const predictions = await Prediction.find(query)
+        .populate('poll', 'question type status result isResolved');
+      return res.json(predictions);
+    }
+    
     const prediction = await Prediction.findOne(query)
       .populate('poll', 'question type status result isResolved');
     
+    // Return null instead of 404 for better frontend handling
     if (!prediction) {
-      return res.status(404).json({ message: 'Prediction not found' });
+      return res.json(null);
     }
     res.json(prediction);
   } catch (error) {
@@ -257,9 +392,19 @@ router.put('/:predictionId', auth, async (req, res) => {
       return res.status(400).json({ message: 'Cannot update prediction. Item is not upcoming' });
     }
     
+    // Normalize outcome for matches to contract canonical form (TeamA, TeamB, Draw)
+    let outcomeToStore = outcome;
+    if (prediction.match && item.teamA != null && item.teamB != null) {
+      const normalized = normalizeMatchOutcome(outcome, item.teamA, item.teamB);
+      if (!normalized) {
+        return res.status(400).json({ message: 'Invalid outcome for match. Use Team A, Team B, or Draw.' });
+      }
+      outcomeToStore = normalized;
+    }
+    
     // For boost predictions, preserve the amount (totalStake) when updating outcome
     const oldOutcome = prediction.outcome;
-    prediction.outcome = outcome;
+    prediction.outcome = outcomeToStore;
     prediction.updatedAt = new Date();
     
     // For boost predictions, the amount is automatically preserved
@@ -285,8 +430,11 @@ router.put('/:predictionId', auth, async (req, res) => {
 // Boost: Add or withdraw stake
 router.post('/boost/:predictionId/stake', auth, async (req, res) => {
   try {
+    if (req.body.walletAddress && String(req.body.walletAddress).trim()) {
+      await User.findByIdAndUpdate(req.user._id, { walletAddress: String(req.body.walletAddress).trim() });
+    }
     const { action, amount } = req.body; // action: 'add' or 'withdraw'
-    
+
     if (!['add', 'withdraw'].includes(action)) {
       return res.status(400).json({ message: 'Action must be "add" or "withdraw"' });
     }
@@ -319,15 +467,27 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     
     const stakeAmount = parseFloat(amount);
     
+    // Get fees from settings
+    const fees = await getFees();
+    
     if (action === 'add') {
-      prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + stakeAmount;
+      // Calculate fees for adding stake
+      const platformFeeAmount = (stakeAmount * fees.platformFee) / 100;
+      const boostJackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
+      const netStakeAmount = stakeAmount - platformFeeAmount - boostJackpotFeeAmount;
+      
+      prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + netStakeAmount;
       prediction.amount = prediction.totalStake;
       
-      // Update boost pool
+      // Update boost pool with net amount and fees
       if (prediction.match) {
-        item.boostPool = (item.boostPool || 0) + stakeAmount;
+        item.boostPool = (item.boostPool || 0) + netStakeAmount;
+        item.boostJackpotPool = (item.boostJackpotPool || 0) + boostJackpotFeeAmount;
+        item.platformFees = (item.platformFees || 0) + platformFeeAmount;
       } else {
-        item.boostPool = (item.boostPool || 0) + stakeAmount;
+        item.boostPool = (item.boostPool || 0) + netStakeAmount;
+        item.boostJackpotPool = (item.boostJackpotPool || 0) + boostJackpotFeeAmount;
+        item.platformFees = (item.platformFees || 0) + platformFeeAmount;
       }
     } else if (action === 'withdraw') {
       const currentStake = prediction.totalStake || prediction.amount || 0;
@@ -335,10 +495,11 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
         return res.status(400).json({ message: 'Cannot withdraw more than current stake' });
       }
       
+      // For withdrawal, reduce from net stake (no fees on withdrawal)
       prediction.totalStake = currentStake - stakeAmount;
       prediction.amount = prediction.totalStake;
       
-      // Update boost pool
+      // Update boost pool (reduce net amount)
       if (prediction.match) {
         item.boostPool = Math.max(0, (item.boostPool || 0) - stakeAmount);
       } else {
@@ -359,7 +520,10 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
 // Market: Buy shares
 router.post('/market/buy', auth, async (req, res) => {
   try {
-    const { matchId, pollId, outcome, amount } = req.body;
+    if (req.body.walletAddress && String(req.body.walletAddress).trim()) {
+      await User.findByIdAndUpdate(req.user._id, { walletAddress: String(req.body.walletAddress).trim() });
+    }
+    let { matchId, pollId, outcome, amount } = req.body;
     
     if (!matchId && !pollId) {
       return res.status(400).json({ message: 'Either matchId or pollId is required' });
@@ -375,16 +539,27 @@ router.post('/market/buy', auth, async (req, res) => {
       if (!item) {
         return res.status(404).json({ message: 'Match not found' });
       }
-      if (!['teamA', 'teamB', 'draw'].includes(outcome)) {
-        return res.status(400).json({ message: 'Invalid outcome for match' });
+      // Accept team names or TeamA/TeamB/Draw (any case) and normalize to contract form
+      const normalizedMatchOutcome = normalizeMatchOutcome(outcome, item.teamA, item.teamB);
+      if (!normalizedMatchOutcome) {
+        return res.status(400).json({ message: 'Invalid outcome for match. Use Team A, Team B, or Draw.' });
       }
+      outcome = normalizedMatchOutcome; // use canonical form for rest of handler
     } else {
       item = await Poll.findById(pollId);
       if (!item) {
         return res.status(404).json({ message: 'Poll not found' });
       }
-      if (!['yes', 'no', 'YES', 'NO'].includes(outcome)) {
-        return res.status(400).json({ message: 'Invalid outcome for poll' });
+      // For option-based polls, validate outcome is one of the option texts
+      if (item.optionType === 'options') {
+        if (!item.options || !item.options.some(opt => opt.text === outcome)) {
+          return res.status(400).json({ message: 'Invalid outcome for poll option' });
+        }
+      } else {
+        // Normal Yes/No poll
+        if (!['yes', 'no', 'YES', 'NO'].includes(outcome)) {
+          return res.status(400).json({ message: 'Invalid outcome for poll' });
+        }
       }
     }
     
@@ -397,14 +572,25 @@ router.post('/market/buy', auth, async (req, res) => {
     }
     
     const investAmount = parseFloat(amount);
-    const normalizedOutcome = outcome.toUpperCase();
+    
+    // Get fees from settings
+    const fees = await getFees();
+    
+    // Calculate fees for market buy
+    const marketPlatformFeeAmount = (investAmount * fees.marketPlatformFee) / 100;
+    const freeJackpotFeeAmount = (investAmount * fees.freeJackpotFee) / 100;
+    const netInvestAmount = investAmount - marketPlatformFeeAmount - freeJackpotFeeAmount;
+    
+    let normalizedOutcome = outcome;
     
     // Calculate shares based on current liquidity (simplified AMM)
+    // Use net amount for liquidity calculation
     let shares = 0;
     let totalLiquidity = 0;
     let optionLiquidity = 0;
     
     if (matchId) {
+      normalizedOutcome = outcome.toUpperCase();
       totalLiquidity = (item.marketTeamALiquidity || 0) + (item.marketTeamBLiquidity || 0) + (item.marketDrawLiquidity || 0);
       if (normalizedOutcome === 'TEAMA') {
         optionLiquidity = item.marketTeamALiquidity || 0;
@@ -414,11 +600,26 @@ router.post('/market/buy', auth, async (req, res) => {
         optionLiquidity = item.marketDrawLiquidity || 0;
       }
     } else {
-      totalLiquidity = (item.marketYesLiquidity || 0) + (item.marketNoLiquidity || 0);
-      if (normalizedOutcome === 'YES') {
-        optionLiquidity = item.marketYesLiquidity || 0;
-      } else if (normalizedOutcome === 'NO') {
-        optionLiquidity = item.marketNoLiquidity || 0;
+      // Handle poll
+      if (item.optionType === 'options') {
+        // For option-based polls, use the option text as outcome
+        normalizedOutcome = outcome;
+        // Calculate total liquidity from all options
+        totalLiquidity = item.options.reduce((sum, opt) => sum + (opt.liquidity || 0), 0);
+        // Find the selected option
+        const selectedOption = item.options.find(opt => opt.text === outcome);
+        if (selectedOption) {
+          optionLiquidity = selectedOption.liquidity || 0;
+        }
+      } else {
+        // Normal Yes/No poll
+        normalizedOutcome = outcome.toUpperCase();
+        totalLiquidity = (item.marketYesLiquidity || 0) + (item.marketNoLiquidity || 0);
+        if (normalizedOutcome === 'YES') {
+          optionLiquidity = item.marketYesLiquidity || 0;
+        } else if (normalizedOutcome === 'NO') {
+          optionLiquidity = item.marketNoLiquidity || 0;
+        }
       }
     }
     
@@ -426,13 +627,37 @@ router.post('/market/buy', auth, async (req, res) => {
       return res.status(400).json({ message: 'Market not initialized' });
     }
     
-    // Calculate shares using constant product formula (simplified)
-    shares = (investAmount * optionLiquidity) / (totalLiquidity + investAmount);
+    // Fixed-Sum AMM Logic:
+    // Price per share = outcomeLiquidity / totalLiquidity (rounded to 4 decimals)
+    // When buying X ETH: shares = X / currentPrice
+    // After buying: newLiquidity = oldLiquidity + X, newTotal = oldTotal + X
     
-    // Find or create prediction
+    // Calculate current price BEFORE adding investment (rounded to 4 decimals)
+    const currentPrice = totalLiquidity > 0 
+      ? parseFloat((optionLiquidity / totalLiquidity).toFixed(4)) 
+      : 0;
+    
+    // Calculate shares: shares = investment / currentPrice
+    if (currentPrice === 0) {
+      // If price is 0, market not initialized properly
+      return res.status(400).json({ message: 'Cannot calculate shares: price is 0' });
+    }
+    shares = parseFloat((netInvestAmount / currentPrice).toFixed(4));
+    
+    // Calculate new liquidity after adding investment
+    const newOptionLiquidity = optionLiquidity + netInvestAmount;
+    const newTotalLiquidity = totalLiquidity + netInvestAmount;
+    
+    // Calculate new price after investment (should be higher, rounded to 4 decimals)
+    const newPrice = newTotalLiquidity > 0 
+      ? parseFloat((newOptionLiquidity / newTotalLiquidity).toFixed(4)) 
+      : 0;
+    
+    // Find or create prediction FOR THIS SPECIFIC OPTION (isolated per option)
     const query = {
       user: req.user._id,
       type: 'market',
+      outcome: normalizedOutcome, // Include outcome in query to isolate per option
     };
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
@@ -440,12 +665,11 @@ router.post('/market/buy', auth, async (req, res) => {
     let prediction = await Prediction.findOne(query);
     
     if (prediction) {
-      // Update existing prediction
+      // Update existing prediction for this option
       prediction.shares = (prediction.shares || 0) + shares;
-      prediction.totalInvested = (prediction.totalInvested || 0) + investAmount;
-      prediction.outcome = normalizedOutcome;
+      prediction.totalInvested = (prediction.totalInvested || 0) + netInvestAmount;
     } else {
-      // Create new prediction
+      // Create new prediction for this option
       prediction = new Prediction({
         user: req.user._id,
         match: matchId,
@@ -453,37 +677,124 @@ router.post('/market/buy', auth, async (req, res) => {
         type: 'market',
         outcome: normalizedOutcome,
         shares: shares,
-        totalInvested: investAmount,
+        totalInvested: netInvestAmount,
       });
     }
     
-    // Update market liquidity
+    // Create trade record for this buy transaction (store net amount and new price)
+    const trade = new Trade({
+      user: req.user._id,
+      match: matchId,
+      poll: pollId,
+      type: 'buy',
+      outcome: normalizedOutcome,
+      amount: netInvestAmount,
+      shares: shares,
+      price: newPrice, // Store the new price after purchase (should be higher)
+    });
+    await trade.save();
+    
+    // Update market liquidity with net amount (AMM: buying increases option's pool)
+    // This automatically increases the price because optionLiquidity/totalLiquidity increases
     if (matchId) {
       if (normalizedOutcome === 'TEAMA') {
-        item.marketTeamALiquidity = (item.marketTeamALiquidity || 0) + investAmount;
+        item.marketTeamALiquidity = newOptionLiquidity; // Use new liquidity (old + investment)
         item.marketTeamAShares = (item.marketTeamAShares || 0) + shares;
       } else if (normalizedOutcome === 'TEAMB') {
-        item.marketTeamBLiquidity = (item.marketTeamBLiquidity || 0) + investAmount;
+        item.marketTeamBLiquidity = newOptionLiquidity;
         item.marketTeamBShares = (item.marketTeamBShares || 0) + shares;
       } else if (normalizedOutcome === 'DRAW') {
-        item.marketDrawLiquidity = (item.marketDrawLiquidity || 0) + investAmount;
+        item.marketDrawLiquidity = newOptionLiquidity;
         item.marketDrawShares = (item.marketDrawShares || 0) + shares;
       }
+      // Update fees and jackpot pools
+      item.freeJackpotPool = (item.freeJackpotPool || 0) + freeJackpotFeeAmount;
+      item.platformFees = (item.platformFees || 0) + marketPlatformFeeAmount;
     } else {
-      if (normalizedOutcome === 'YES') {
-        item.marketYesLiquidity = (item.marketYesLiquidity || 0) + investAmount;
-        item.marketYesShares = (item.marketYesShares || 0) + shares;
-      } else if (normalizedOutcome === 'NO') {
-        item.marketNoLiquidity = (item.marketNoLiquidity || 0) + investAmount;
-        item.marketNoShares = (item.marketNoShares || 0) + shares;
+      // Handle poll
+      if (item.optionType === 'options') {
+        // Update the specific option
+        const selectedOption = item.options.find(opt => opt.text === outcome);
+        if (selectedOption) {
+          selectedOption.liquidity = newOptionLiquidity; // Use new liquidity
+          selectedOption.shares = (selectedOption.shares || 0) + shares;
+        }
+      } else {
+        // Normal Yes/No poll
+        if (normalizedOutcome === 'YES') {
+          item.marketYesLiquidity = newOptionLiquidity;
+          item.marketYesShares = (item.marketYesShares || 0) + shares;
+        } else if (normalizedOutcome === 'NO') {
+          item.marketNoLiquidity = newOptionLiquidity;
+          item.marketNoShares = (item.marketNoShares || 0) + shares;
+        }
       }
+      // Update fees and jackpot pools for polls
+      item.freeJackpotPool = (item.freeJackpotPool || 0) + freeJackpotFeeAmount;
+      item.platformFees = (item.platformFees || 0) + marketPlatformFeeAmount;
     }
     
     prediction.updatedAt = new Date();
     await prediction.save();
     await item.save();
     
-    res.json(prediction);
+    // Reload item to get fresh data with updated prices
+    const updatedItem = matchId 
+      ? await Match.findById(matchId)
+      : await Poll.findById(pollId);
+    
+    // Calculate updated prices for response
+    let updatedPrices = {};
+    let updatedTotalLiquidity = 0;
+    
+    if (matchId) {
+      updatedTotalLiquidity = (updatedItem.marketTeamALiquidity || 0) + 
+                              (updatedItem.marketTeamBLiquidity || 0) + 
+                              (updatedItem.marketDrawLiquidity || 0);
+      // Round all prices to 4 decimal places
+      updatedPrices.teamA = updatedTotalLiquidity > 0 
+        ? parseFloat(((updatedItem.marketTeamALiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+        : parseFloat((0.333).toFixed(4));
+      updatedPrices.teamB = updatedTotalLiquidity > 0 
+        ? parseFloat(((updatedItem.marketTeamBLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+        : parseFloat((0.333).toFixed(4));
+      updatedPrices.draw = updatedTotalLiquidity > 0 
+        ? parseFloat(((updatedItem.marketDrawLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+        : parseFloat((0.333).toFixed(4));
+    } else {
+      if (updatedItem.optionType === 'options') {
+        updatedTotalLiquidity = updatedItem.options.reduce((sum, opt) => sum + (opt.liquidity || 0), 0);
+        updatedItem.options.forEach(opt => {
+          const defaultPrice = 1 / updatedItem.options.length;
+          updatedPrices[opt.text] = updatedTotalLiquidity > 0 
+            ? parseFloat(((opt.liquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+            : parseFloat(defaultPrice.toFixed(4));
+        });
+      } else {
+        updatedTotalLiquidity = (updatedItem.marketYesLiquidity || 0) + (updatedItem.marketNoLiquidity || 0);
+        updatedPrices.yes = updatedTotalLiquidity > 0 
+          ? parseFloat(((updatedItem.marketYesLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+          : parseFloat((0.5).toFixed(4));
+        updatedPrices.no = updatedTotalLiquidity > 0 
+          ? parseFloat(((updatedItem.marketNoLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+          : parseFloat((0.5).toFixed(4));
+      }
+    }
+    
+    // Verify prices sum to 1.0
+    const priceSum = Object.values(updatedPrices).reduce((sum, price) => sum + price, 0);
+    if (Math.abs(priceSum - 1.0) > 0.01) {
+      console.warn('Prices do not sum to 1.0 after buy:', priceSum, updatedPrices);
+    }
+    
+    res.json({
+      prediction,
+      updatedItem,
+      updatedPrices,
+      newPrice,
+      totalLiquidity: updatedTotalLiquidity,
+      message: 'Buy successful. All prices updated.'
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -492,30 +803,87 @@ router.post('/market/buy', auth, async (req, res) => {
 // Market: Sell shares
 router.post('/market/sell', auth, async (req, res) => {
   try {
-    const { matchId, pollId, shares: sharesToSell } = req.body;
+    const { matchId, pollId, outcome, shares: sharesToSell } = req.body;
     
     if (!matchId && !pollId) {
       return res.status(400).json({ message: 'Either matchId or pollId is required' });
     }
     
-    const query = {
+    if (!outcome) {
+      return res.status(400).json({ message: 'Outcome is required for selling' });
+    }
+    
+    // Get item first to check optionType
+    let item = null;
+    if (matchId) {
+      item = await Match.findById(matchId);
+      if (!item) {
+        return res.status(404).json({ message: 'Match not found' });
+      }
+    } else {
+      item = await Poll.findById(pollId);
+      if (!item) {
+        return res.status(404).json({ message: 'Poll not found' });
+      }
+    }
+    
+    // Normalize outcome BEFORE searching for prediction (must match how it was stored during buy)
+    let normalizedOutcome = outcome;
+    if (matchId) {
+      // For matches: use same canonical form as buy (TeamA, TeamB, Draw)
+      const canonical = normalizeMatchOutcome(outcome, item.teamA, item.teamB);
+      if (!canonical) {
+        return res.status(400).json({ message: 'Invalid outcome for match. Use Team A, Team B, or Draw.' });
+      }
+      normalizedOutcome = canonical;
+    } else {
+      // For polls
+      if (item.optionType === 'options') {
+        // For option-based polls, keep as-is (exact text match, same as buy route)
+        normalizedOutcome = outcome;
+      } else {
+        // Normal Yes/No poll: normalize to YES/NO (same as buy route)
+        normalizedOutcome = outcome.toUpperCase();
+      }
+    }
+    
+    // Find prediction FOR THIS SPECIFIC OPTION (isolated per option)
+    // Try multiple variations to find the prediction (in case of case mismatches)
+    let query = {
       user: req.user._id,
       type: 'market',
     };
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
     
-    const prediction = await Prediction.findOne(query)
+    // Try to find prediction with normalized outcome (primary search)
+    let prediction = await Prediction.findOne({ ...query, outcome: normalizedOutcome })
       .populate('match')
       .populate('poll');
     
+    // If not found, try with original outcome (for option-based polls)
     if (!prediction) {
-      return res.status(404).json({ message: 'No market position found' });
+      prediction = await Prediction.findOne({ ...query, outcome: outcome })
+        .populate('match')
+        .populate('poll');
     }
     
-    let item = prediction.match || prediction.poll;
-    if (!item) {
-      return res.status(404).json({ message: 'Item not found' });
+    // If still not found, try uppercase version
+    if (!prediction) {
+      prediction = await Prediction.findOne({ ...query, outcome: outcome.toUpperCase() })
+        .populate('match')
+        .populate('poll');
+    }
+    
+    // If still not found, try lowercase version
+    if (!prediction) {
+      prediction = await Prediction.findOne({ ...query, outcome: outcome.toLowerCase() })
+        .populate('match')
+        .populate('poll');
+    }
+    
+    if (!prediction) {
+      return res.status(404).json({ message: 'No market position found for this option' });
     }
     
     if (item.status === 'locked' || item.status === 'completed' || item.status === 'settled' || item.isResolved) {
@@ -523,6 +891,12 @@ router.post('/market/sell', auth, async (req, res) => {
     }
     
     const currentShares = prediction.shares || 0;
+    
+    // Check if user has any shares for this option
+    if (currentShares <= 0) {
+      return res.status(400).json({ message: 'No shares to sell for this option' });
+    }
+    
     const sellShares = sharesToSell === 'max' || sharesToSell === 'all' 
       ? currentShares 
       : parseFloat(sharesToSell);
@@ -531,8 +905,10 @@ router.post('/market/sell', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid shares amount' });
     }
     
+    // Use the prediction's stored outcome for calculations
+    normalizedOutcome = prediction.outcome;
+    
     // Calculate payout based on current market price
-    const normalizedOutcome = prediction.outcome.toUpperCase();
     let totalLiquidity = 0;
     let optionLiquidity = 0;
     let payout = 0;
@@ -547,18 +923,41 @@ router.post('/market/sell', auth, async (req, res) => {
         optionLiquidity = item.marketDrawLiquidity || 0;
       }
     } else {
-      totalLiquidity = (item.marketYesLiquidity || 0) + (item.marketNoLiquidity || 0);
-      if (normalizedOutcome === 'YES') {
-        optionLiquidity = item.marketYesLiquidity || 0;
-      } else if (normalizedOutcome === 'NO') {
-        optionLiquidity = item.marketNoLiquidity || 0;
+      // Handle poll
+      if (item.optionType === 'options') {
+        // Calculate total liquidity from all options
+        totalLiquidity = item.options.reduce((sum, opt) => sum + (opt.liquidity || 0), 0);
+        // Find the selected option using normalizedOutcome (from prediction)
+        const selectedOption = item.options.find(opt => opt.text === normalizedOutcome || opt.text === outcome);
+        if (selectedOption) {
+          optionLiquidity = selectedOption.liquidity || 0;
+        }
+      } else {
+        // Normal Yes/No poll
+        totalLiquidity = (item.marketYesLiquidity || 0) + (item.marketNoLiquidity || 0);
+        if (normalizedOutcome === 'YES') {
+          optionLiquidity = item.marketYesLiquidity || 0;
+        } else if (normalizedOutcome === 'NO') {
+          optionLiquidity = item.marketNoLiquidity || 0;
+        }
       }
     }
     
-    if (totalLiquidity > 0 && optionLiquidity > 0) {
-      // Calculate payout (simplified - in real AMM this would be more complex)
-      payout = (sellShares * totalLiquidity) / (optionLiquidity + sellShares);
+    // Fixed-Sum AMM Sell Logic:
+    // Price per share = outcomeLiquidity / totalLiquidity (rounded to 4 decimals)
+    // When selling Y shares: payout = Y * currentPrice
+    // After selling: newLiquidity = oldLiquidity - payout, newTotal = oldTotal - payout
+    
+    // Calculate current price BEFORE selling (rounded to 4 decimals)
+    const currentPrice = totalLiquidity > 0 
+      ? parseFloat((optionLiquidity / totalLiquidity).toFixed(4)) 
+      : 0;
+    
+    // Calculate payout: payout = shares * currentPrice
+    if (currentPrice === 0) {
+      return res.status(400).json({ message: 'Cannot calculate payout: price is 0' });
     }
+    payout = parseFloat((sellShares * currentPrice).toFixed(4));
     
     // Update prediction
     prediction.shares = currentShares - sellShares;
@@ -567,35 +966,120 @@ router.post('/market/sell', auth, async (req, res) => {
     }
     prediction.updatedAt = new Date();
     
-    // Update market liquidity
+    // Update market liquidity (AMM: selling decreases option's pool, which decreases price)
+    // Calculate new liquidity after removing payout
+    const newOptionLiquidity = Math.max(0, optionLiquidity - payout);
+    const newTotalLiquidity = Math.max(0, totalLiquidity - payout);
+    
     if (matchId) {
       if (normalizedOutcome === 'TEAMA') {
-        item.marketTeamALiquidity = Math.max(0, (item.marketTeamALiquidity || 0) - payout);
+        item.marketTeamALiquidity = newOptionLiquidity; // Decreased liquidity = lower price
         item.marketTeamAShares = Math.max(0, (item.marketTeamAShares || 0) - sellShares);
       } else if (normalizedOutcome === 'TEAMB') {
-        item.marketTeamBLiquidity = Math.max(0, (item.marketTeamBLiquidity || 0) - payout);
+        item.marketTeamBLiquidity = newOptionLiquidity;
         item.marketTeamBShares = Math.max(0, (item.marketTeamBShares || 0) - sellShares);
       } else if (normalizedOutcome === 'DRAW') {
-        item.marketDrawLiquidity = Math.max(0, (item.marketDrawLiquidity || 0) - payout);
+        item.marketDrawLiquidity = newOptionLiquidity;
         item.marketDrawShares = Math.max(0, (item.marketDrawShares || 0) - sellShares);
       }
     } else {
-      if (normalizedOutcome === 'YES') {
-        item.marketYesLiquidity = Math.max(0, (item.marketYesLiquidity || 0) - payout);
-        item.marketYesShares = Math.max(0, (item.marketYesShares || 0) - sellShares);
-      } else if (normalizedOutcome === 'NO') {
-        item.marketNoLiquidity = Math.max(0, (item.marketNoLiquidity || 0) - payout);
-        item.marketNoShares = Math.max(0, (item.marketNoShares || 0) - sellShares);
+      // Handle poll
+      if (item.optionType === 'options') {
+        const selectedOption = item.options.find(opt => opt.text === outcome || opt.text === normalizedOutcome);
+        if (selectedOption) {
+          selectedOption.liquidity = newOptionLiquidity; // Decreased liquidity = lower price
+          selectedOption.shares = Math.max(0, (selectedOption.shares || 0) - sellShares);
+        }
+      } else {
+        if (normalizedOutcome === 'YES') {
+          item.marketYesLiquidity = newOptionLiquidity;
+          item.marketYesShares = Math.max(0, (item.marketYesShares || 0) - sellShares);
+        } else if (normalizedOutcome === 'NO') {
+          item.marketNoLiquidity = newOptionLiquidity;
+          item.marketNoShares = Math.max(0, (item.marketNoShares || 0) - sellShares);
+        }
       }
     }
     
+    // Calculate new price after selling (should be lower, rounded to 4 decimals)
+    const newPrice = newTotalLiquidity > 0 
+      ? parseFloat((newOptionLiquidity / newTotalLiquidity).toFixed(4)) 
+      : 0;
+    
+    // Create trade record for this sell transaction (store new price after sell)
+    const trade = new Trade({
+      user: req.user._id,
+      match: matchId,
+      poll: pollId,
+      type: 'sell',
+      outcome: normalizedOutcome,
+      amount: payout,
+      shares: sellShares,
+      price: newPrice, // Store the new price after selling (should be lower)
+    });
+    await trade.save();
+    
     await prediction.save();
     await item.save();
+    
+    // Reload item to get fresh data with updated prices
+    const updatedItem = matchId 
+      ? await Match.findById(matchId)
+      : await Poll.findById(pollId);
+    
+    // Calculate updated prices for response
+    let updatedPrices = {};
+    let updatedTotalLiquidity = 0;
+    
+    if (matchId) {
+      updatedTotalLiquidity = (updatedItem.marketTeamALiquidity || 0) + 
+                              (updatedItem.marketTeamBLiquidity || 0) + 
+                              (updatedItem.marketDrawLiquidity || 0);
+      // Round all prices to 4 decimal places
+      updatedPrices.teamA = updatedTotalLiquidity > 0 
+        ? parseFloat(((updatedItem.marketTeamALiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+        : parseFloat((0.333).toFixed(4));
+      updatedPrices.teamB = updatedTotalLiquidity > 0 
+        ? parseFloat(((updatedItem.marketTeamBLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+        : parseFloat((0.333).toFixed(4));
+      updatedPrices.draw = updatedTotalLiquidity > 0 
+        ? parseFloat(((updatedItem.marketDrawLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+        : parseFloat((0.333).toFixed(4));
+    } else {
+      if (updatedItem.optionType === 'options') {
+        updatedTotalLiquidity = updatedItem.options.reduce((sum, opt) => sum + (opt.liquidity || 0), 0);
+        updatedItem.options.forEach(opt => {
+          const defaultPrice = 1 / updatedItem.options.length;
+          updatedPrices[opt.text] = updatedTotalLiquidity > 0 
+            ? parseFloat(((opt.liquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+            : parseFloat(defaultPrice.toFixed(4));
+        });
+      } else {
+        updatedTotalLiquidity = (updatedItem.marketYesLiquidity || 0) + (updatedItem.marketNoLiquidity || 0);
+        updatedPrices.yes = updatedTotalLiquidity > 0 
+          ? parseFloat(((updatedItem.marketYesLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+          : parseFloat((0.5).toFixed(4));
+        updatedPrices.no = updatedTotalLiquidity > 0 
+          ? parseFloat(((updatedItem.marketNoLiquidity || 0) / updatedTotalLiquidity).toFixed(4)) 
+          : parseFloat((0.5).toFixed(4));
+      }
+    }
+    
+    // Verify prices sum to 1.0
+    const priceSum = Object.values(updatedPrices).reduce((sum, price) => sum + price, 0);
+    if (Math.abs(priceSum - 1.0) > 0.01) {
+      console.warn('Prices do not sum to 1.0 after sell:', priceSum, updatedPrices);
+    }
     
     res.json({
       prediction,
       payout,
       sharesSold: sellShares,
+      updatedItem,
+      updatedPrices,
+      newPrice,
+      totalLiquidity: updatedTotalLiquidity,
+      message: 'Sell successful. All prices updated.'
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -629,30 +1113,40 @@ router.get('/market/:itemId/data', async (req, res) => {
       prices.teamB = totalLiquidity === 0 ? 0.333 : (item.marketTeamBLiquidity || 0) / totalLiquidity;
       prices.draw = totalLiquidity === 0 ? 0.333 : (item.marketDrawLiquidity || 0) / totalLiquidity;
     } else {
-      totalLiquidity = (item.marketYesLiquidity || 0) + (item.marketNoLiquidity || 0);
-      prices.yes = totalLiquidity === 0 ? 0.5 : (item.marketYesLiquidity || 0) / totalLiquidity;
-      prices.no = totalLiquidity === 0 ? 0.5 : (item.marketNoLiquidity || 0) / totalLiquidity;
+      // Handle poll
+      if (item.optionType === 'options') {
+        // For option-based polls, calculate prices for each option
+        totalLiquidity = item.options.reduce((sum, opt) => sum + (opt.liquidity || 0), 0);
+        prices = {};
+        item.options.forEach(opt => {
+          prices[opt.text] = totalLiquidity === 0 ? (1 / item.options.length) : (opt.liquidity || 0) / totalLiquidity;
+        });
+      } else {
+        // Normal Yes/No poll
+        totalLiquidity = (item.marketYesLiquidity || 0) + (item.marketNoLiquidity || 0);
+        prices.yes = totalLiquidity === 0 ? 0.5 : (item.marketYesLiquidity || 0) / totalLiquidity;
+        prices.no = totalLiquidity === 0 ? 0.5 : (item.marketNoLiquidity || 0) / totalLiquidity;
+      }
     }
     
-    // Get all market predictions to show trading activity
-    const allMarketPredictions = await Prediction.find({
+    // Get all trades from Trade model to show trading activity
+    const allTrades = await Trade.find({
       [type === 'match' ? 'match' : 'poll']: itemId,
-      type: 'market',
     })
       .populate('user', 'username')
-      .sort({ updatedAt: -1 })
+      .sort({ createdAt: -1 })
       .limit(100); // Show up to 100 recent trades
     
-    // Format trades for display - show each prediction as a buy trade
-    // When users sell, we could track that separately, but for now we show all market positions
-    const formattedTrades = allMarketPredictions.map(trade => ({
+    // Format trades for display
+    const formattedTrades = allTrades.map(trade => ({
       id: trade._id,
       user: trade.user?.username || 'Unknown',
       outcome: trade.outcome,
       shares: trade.shares || 0,
-      totalInvested: trade.totalInvested || 0,
-      timestamp: trade.updatedAt || trade.createdAt,
-      type: 'buy', // All market predictions are purchases (sells reduce shares but don't create new predictions)
+      amount: trade.amount || 0,
+      price: trade.price || 0,
+      timestamp: trade.createdAt,
+      type: trade.type, // 'buy' or 'sell'
     }));
     
     res.json({
@@ -666,6 +1160,51 @@ router.get('/market/:itemId/data', async (req, res) => {
         result: item.result,
       },
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Claim payout for a prediction
+router.post('/:predictionId/claim', auth, async (req, res) => {
+  try {
+    const prediction = await Prediction.findById(req.params.predictionId)
+      .populate('match')
+      .populate('poll');
+    
+    if (!prediction) {
+      return res.status(404).json({ message: 'Prediction not found' });
+    }
+    
+    if (prediction.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    
+    if (prediction.claimed) {
+      return res.status(400).json({ message: 'Already claimed' });
+    }
+    
+    if (prediction.status !== 'settled' || prediction.payout <= 0) {
+      return res.status(400).json({ message: 'No payout available' });
+    }
+    
+    const item = prediction.match || prediction.poll;
+    if (!item || !item.isResolved) {
+      return res.status(400).json({ message: 'Item not resolved' });
+    }
+    
+    // Mark as claimed
+    prediction.claimed = true;
+    await prediction.save();
+    
+    // Update user balance (if you have a balance field)
+    const user = await User.findById(req.user._id);
+    if (user) {
+      user.balance = (user.balance || 0) + prediction.payout;
+      await user.save();
+    }
+    
+    res.json({ prediction, message: 'Payout claimed successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

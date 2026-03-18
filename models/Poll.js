@@ -13,6 +13,28 @@ const pollSchema = new mongoose.Schema({
     enum: ['match', 'team', 'stage', 'award'],
     required: true,
   },
+  optionType: {
+    type: String,
+    enum: ['normal', 'options'],
+    default: 'normal',
+  },
+  options: [{
+    text: {
+      type: String,
+      required: true,
+    },
+    image: {
+      type: String,
+    },
+    liquidity: {
+      type: Number,
+      default: 0,
+    },
+    shares: {
+      type: Number,
+      default: 0,
+    },
+  }],
   cup: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Cup',
@@ -24,11 +46,14 @@ const pollSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['upcoming', 'active', 'settled'],
+    enum: ['upcoming', 'active', 'settled', 'locked'],
     default: 'active',
   },
   result: {
     type: String,
+  },
+  marketId: {
+    type: Number,
   },
   marketInitialized: {
     type: Boolean,
@@ -54,9 +79,42 @@ const pollSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isSponsored: {
+    type: Boolean,
+    default: false,
+  },
+  sponsoredImages: [{
+    type: String,
+  }],
+  lockedTime: {
+    type: Date,
+  },
   isResolved: {
     type: Boolean,
     default: false,
+  },
+  // Jackpot pools
+  freeJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  boostJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  // Store original jackpot amounts before distribution (for display after resolution)
+  originalFreeJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  originalBoostJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  // Platform fees collected
+  platformFees: {
+    type: Number,
+    default: 0,
   },
   createdAt: {
     type: Date,

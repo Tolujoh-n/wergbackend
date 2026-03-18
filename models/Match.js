@@ -9,6 +9,12 @@ const matchSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  teamAImage: {
+    type: String,
+  },
+  teamBImage: {
+    type: String,
+  },
   date: {
     type: Date,
     required: true,
@@ -40,6 +46,9 @@ const matchSchema = new mongoose.Schema({
   boostPool: {
     type: Number,
     default: 0,
+  },
+  marketId: {
+    type: Number,
   },
   marketInitialized: {
     type: Boolean,
@@ -75,9 +84,42 @@ const matchSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isSponsored: {
+    type: Boolean,
+    default: false,
+  },
+  sponsoredImages: [{
+    type: String,
+  }],
+  lockedTime: {
+    type: Date,
+  },
   isResolved: {
     type: Boolean,
     default: false,
+  },
+  // Jackpot pools
+  freeJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  boostJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  // Store original jackpot amounts before distribution (for display after resolution)
+  originalFreeJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  originalBoostJackpotPool: {
+    type: Number,
+    default: 0,
+  },
+  // Platform fees collected
+  platformFees: {
+    type: Number,
+    default: 0,
   },
   createdAt: {
     type: Date,

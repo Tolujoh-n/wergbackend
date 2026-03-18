@@ -32,6 +32,53 @@ router.get('/profile', auth, async (req, res) => {
   }
 });
 
+// Check if username is available (for profile edit). Query: ?username=xxx
+router.get('/check-username', auth, async (req, res) => {
+  try {
+    const { username } = req.query;
+    if (!username || typeof username !== 'string') {
+      return res.status(400).json({ available: false, message: 'Username required' });
+    }
+    const trimmed = username.trim();
+    if (trimmed.length < 5) {
+      return res.json({ available: false, message: 'Username must be at least 5 characters' });
+    }
+    if (/\s/.test(trimmed)) {
+      return res.json({ available: false, message: 'Username cannot contain spaces' });
+    }
+    const existing = await User.findOne({ username: new RegExp(`^${trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+    const isCurrentUser = existing && req.user._id && existing._id.toString() === req.user._id.toString();
+    return res.json({ available: !existing || isCurrentUser, message: existing && !isCurrentUser ? 'Username already taken' : null });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update profile (username)
+router.patch('/profile', auth, async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username || typeof username !== 'string') {
+      return res.status(400).json({ message: 'Username is required' });
+    }
+    const trimmed = username.trim();
+    if (trimmed.length < 5) {
+      return res.status(400).json({ message: 'Username must be at least 5 characters' });
+    }
+    if (/\s/.test(trimmed)) {
+      return res.status(400).json({ message: 'Username cannot contain spaces' });
+    }
+    const existing = await User.findOne({ username: new RegExp(`^${trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+    if (existing && existing._id.toString() !== req.user._id.toString()) {
+      return res.status(400).json({ message: 'Username already taken' });
+    }
+    const user = await User.findByIdAndUpdate(req.user._id, { username: trimmed }, { new: true }).select('-password');
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get user by ID
 router.get('/:id', async (req, res) => {
   try {

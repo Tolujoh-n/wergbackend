@@ -48,6 +48,19 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  // Jackpot balance
+  jackpotBalance: {
+    type: Number,
+    default: 0,
+  },
+  jackpotWithdrawn: {
+    type: Number,
+    default: 0,
+  },
+  jackpotWins: {
+    type: Number,
+    default: 0,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
