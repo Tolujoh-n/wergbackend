@@ -1,6 +1,13 @@
 const express = require('express');
+const crypto = require('crypto');
+const { ethers } = require('ethers');
 const { auth } = require('../middleware/auth');
 const User = require('../models/User');
+const { payoutToWei } = require('../utils/claimEligibility');
+const {
+  getClaimSignerAddress,
+  signJackpotWithdrawPayload,
+} = require('../utils/claimAuth');
 const Prediction = require('../models/Prediction');
 const Match = require('../models/Match');
 const Poll = require('../models/Poll');
@@ -500,7 +507,86 @@ router.get('/user/stats', auth, async (req, res) => {
   }
 });
 
-// Withdraw jackpot
+/**
+ * Validates balance and returns signed payload for withdrawJackpotWithAuth (CLAIM_AUTH_PRIVATE_KEY on server).
+ */
+router.post('/withdraw/authorization', auth, async (req, res) => {
+  try {
+    const { amount, walletAddress } = req.body || {};
+    if (!amount || parseFloat(amount) <= 0) {
+      return res.status(400).json({ message: 'Invalid amount' });
+    }
+    if (!walletAddress) {
+      return res.status(400).json({ message: 'walletAddress is required' });
+    }
+
+    const claimSignerAddress = getClaimSignerAddress();
+    if (!claimSignerAddress) {
+      return res.status(503).json({
+        message: 'Withdrawals are not configured (set CLAIM_AUTH_PRIVATE_KEY on the server)',
+      });
+    }
+
+    const contractAddressRaw =
+      process.env.CONTRACT_ADDRESS || process.env.REACT_APP_CONTRACT_ADDRESS;
+    const chainId = parseInt(process.env.CHAIN_ID || '84532', 10);
+    if (!contractAddressRaw) {
+      return res.status(500).json({
+        message: 'Set CONTRACT_ADDRESS (or REACT_APP_CONTRACT_ADDRESS) on the server',
+      });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const withdrawAmount = parseFloat(amount);
+    const currentBalance = user.jackpotBalance || 0;
+    if (withdrawAmount > currentBalance) {
+      return res.status(400).json({ message: 'Insufficient jackpot balance' });
+    }
+
+    if (!user.walletAddress) {
+      return res.status(400).json({ message: 'Link a wallet to your account' });
+    }
+
+    const profileAddr = ethers.getAddress(user.walletAddress);
+    const reqAddr = ethers.getAddress(walletAddress);
+    if (profileAddr !== reqAddr) {
+      return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
+    }
+
+    const amountWei = payoutToWei(withdrawAmount);
+    const deadlineSec = Math.floor(Date.now() / 1000) + 30 * 60;
+    const nonce = ethers.hexlify(crypto.randomBytes(32));
+    const contractAddress = ethers.getAddress(contractAddressRaw);
+
+    const { signature } = await signJackpotWithdrawPayload({
+      userAddress: reqAddr,
+      amountWei,
+      nonce,
+      deadlineSec,
+      chainId,
+      contractAddress,
+    });
+
+    res.json({
+      claimSignerAddress,
+      contractAddress,
+      chainId,
+      amountWei: amountWei.toString(),
+      nonce,
+      deadline: deadlineSec,
+      signature,
+    });
+  } catch (error) {
+    console.error('withdraw/authorization:', error);
+    res.status(500).json({ message: error.message || 'Failed to authorize withdrawal' });
+  }
+});
+
+// Withdraw jackpot (update DB after on-chain withdrawal)
 router.post('/withdraw', auth, async (req, res) => {
   try {
     const { amount } = req.body;

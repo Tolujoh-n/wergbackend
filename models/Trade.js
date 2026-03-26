@@ -35,6 +35,12 @@ const tradeSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  // Full post-trade price snapshot (e.g. { yes, no } or { teamA, draw, teamB } or option-text keys).
+  // Used for accurate charting since every trade changes all outcome prices.
+  pricesSnapshot: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

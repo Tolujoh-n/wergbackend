@@ -6,6 +6,12 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const Trade = require('../models/Trade');
 const { auth } = require('../middleware/auth');
+const { ethers } = require('ethers');
+const { payoutToWei, predictionIdToBytes32 } = require('../utils/claimEligibility');
+const {
+  getClaimSignerAddress,
+  signPredictionClaimPayload,
+} = require('../utils/claimAuth');
 
 const router = express.Router();
 
@@ -48,8 +54,8 @@ function normalizeMatchOutcome(outcome, teamA, teamB) {
 router.get('/user', auth, async (req, res) => {
   try {
     const predictions = await Prediction.find({ user: req.user._id })
-      .populate('match', 'teamA teamB date status result')
-      .populate('poll', 'question type')
+      .populate('match', 'teamA teamB date status result isResolved')
+      .populate('poll', 'question type status result isResolved')
       .sort({ createdAt: -1 })
       .limit(100);
     
@@ -681,19 +687,6 @@ router.post('/market/buy', auth, async (req, res) => {
       });
     }
     
-    // Create trade record for this buy transaction (store net amount and new price)
-    const trade = new Trade({
-      user: req.user._id,
-      match: matchId,
-      poll: pollId,
-      type: 'buy',
-      outcome: normalizedOutcome,
-      amount: netInvestAmount,
-      shares: shares,
-      price: newPrice, // Store the new price after purchase (should be higher)
-    });
-    await trade.save();
-    
     // Update market liquidity with net amount (AMM: buying increases option's pool)
     // This automatically increases the price because optionLiquidity/totalLiquidity increases
     if (matchId) {
@@ -786,6 +779,21 @@ router.post('/market/buy', auth, async (req, res) => {
     if (Math.abs(priceSum - 1.0) > 0.01) {
       console.warn('Prices do not sum to 1.0 after buy:', priceSum, updatedPrices);
     }
+
+    // Create trade record for this buy transaction with full post-trade price snapshot.
+    // This is required for correct charting because every trade changes ALL outcome prices.
+    const trade = new Trade({
+      user: req.user._id,
+      match: matchId,
+      poll: pollId,
+      type: 'buy',
+      outcome: normalizedOutcome,
+      amount: netInvestAmount,
+      shares: shares,
+      price: newPrice, // Price for the traded outcome after purchase
+      pricesSnapshot: updatedPrices, // Full post-trade prices
+    });
+    await trade.save();
     
     res.json({
       prediction,
@@ -1006,19 +1014,6 @@ router.post('/market/sell', auth, async (req, res) => {
       ? parseFloat((newOptionLiquidity / newTotalLiquidity).toFixed(4)) 
       : 0;
     
-    // Create trade record for this sell transaction (store new price after sell)
-    const trade = new Trade({
-      user: req.user._id,
-      match: matchId,
-      poll: pollId,
-      type: 'sell',
-      outcome: normalizedOutcome,
-      amount: payout,
-      shares: sellShares,
-      price: newPrice, // Store the new price after selling (should be lower)
-    });
-    await trade.save();
-    
     await prediction.save();
     await item.save();
     
@@ -1070,6 +1065,20 @@ router.post('/market/sell', auth, async (req, res) => {
     if (Math.abs(priceSum - 1.0) > 0.01) {
       console.warn('Prices do not sum to 1.0 after sell:', priceSum, updatedPrices);
     }
+
+    // Create trade record for this sell transaction with full post-trade price snapshot.
+    const trade = new Trade({
+      user: req.user._id,
+      match: matchId,
+      poll: pollId,
+      type: 'sell',
+      outcome: normalizedOutcome,
+      amount: payout,
+      shares: sellShares,
+      price: newPrice, // Price for the traded outcome after sell
+      pricesSnapshot: updatedPrices, // Full post-trade prices
+    });
+    await trade.save();
     
     res.json({
       prediction,
@@ -1145,6 +1154,7 @@ router.get('/market/:itemId/data', async (req, res) => {
       shares: trade.shares || 0,
       amount: trade.amount || 0,
       price: trade.price || 0,
+      pricesSnapshot: trade.pricesSnapshot || null,
       timestamp: trade.createdAt,
       type: trade.type, // 'buy' or 'sell'
     }));
@@ -1165,7 +1175,111 @@ router.get('/market/:itemId/data', async (req, res) => {
   }
 });
 
-// Claim payout for a prediction
+/**
+ * Validates eligibility and returns EIP-191 signature from CLAIM_AUTH_PRIVATE_KEY (server-side, production-safe).
+ */
+async function handleClaimAuthorization(req, res) {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress) {
+      return res.status(400).json({ message: 'walletAddress is required' });
+    }
+
+    const claimSignerAddress = getClaimSignerAddress();
+    if (!claimSignerAddress) {
+      return res.status(503).json({
+        message: 'Claims are not configured (set CLAIM_AUTH_PRIVATE_KEY on the server)',
+      });
+    }
+
+    const contractAddressRaw =
+      process.env.CONTRACT_ADDRESS || process.env.REACT_APP_CONTRACT_ADDRESS;
+    const chainId = parseInt(process.env.CHAIN_ID || '84532', 10);
+    if (!contractAddressRaw) {
+      return res.status(500).json({
+        message: 'Set CONTRACT_ADDRESS (or REACT_APP_CONTRACT_ADDRESS) on the server',
+      });
+    }
+
+    const prediction = await Prediction.findById(req.params.predictionId)
+      .populate('match')
+      .populate('poll');
+
+    if (!prediction) {
+      return res.status(404).json({ message: 'Prediction not found' });
+    }
+
+    if (prediction.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    if (prediction.claimed) {
+      return res.status(400).json({ message: 'Already claimed' });
+    }
+
+    if (prediction.status !== 'settled' || !(prediction.payout > 0)) {
+      return res.status(400).json({ message: 'No payout available' });
+    }
+
+    if (prediction.type !== 'boost' && prediction.type !== 'market') {
+      return res.status(400).json({ message: 'Only boost or market predictions use this claim' });
+    }
+
+    const item = prediction.match || prediction.poll;
+    if (!item || !item.isResolved || item.marketId == null) {
+      return res.status(400).json({ message: 'Market not resolved or missing marketId' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user || !user.walletAddress) {
+      return res.status(400).json({ message: 'Link a wallet to your account before claiming' });
+    }
+
+    const profileAddr = ethers.getAddress(user.walletAddress);
+    const signerAddr = ethers.getAddress(walletAddress);
+    if (profileAddr !== signerAddr) {
+      return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
+    }
+
+    const amountWei = payoutToWei(prediction.payout);
+    const deadlineSec = Math.floor(Date.now() / 1000) + 30 * 60;
+    const isBoost = prediction.type === 'boost';
+    const contractAddress = ethers.getAddress(contractAddressRaw);
+    const predictionId = predictionIdToBytes32(prediction._id.toString());
+
+    const { signature } = await signPredictionClaimPayload({
+      userAddress: signerAddr,
+      marketId: item.marketId,
+      isBoost,
+      amountWei,
+      predictionId,
+      deadlineSec,
+      chainId,
+      contractAddress,
+    });
+
+    res.json({
+      claimSignerAddress,
+      contractAddress,
+      chainId,
+      marketId: item.marketId,
+      isBoost,
+      amountWei: amountWei.toString(),
+      predictionId,
+      deadline: deadlineSec,
+      signature,
+    });
+  } catch (error) {
+    console.error('claim-authorization:', error);
+    res.status(500).json({ message: error.message || 'Failed to authorize claim' });
+  }
+}
+
+router.post('/:predictionId/claim-authorization', auth, handleClaimAuthorization);
+/** @deprecated Use claim-authorization */
+router.post('/:predictionId/claim-eligibility', auth, handleClaimAuthorization);
+
+// Claim payout for a prediction (after successful on-chain tx)
 router.post('/:predictionId/claim', auth, async (req, res) => {
   try {
     const prediction = await Prediction.findById(req.params.predictionId)
