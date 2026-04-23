@@ -5,6 +5,9 @@ const cupSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  thumbnailImage: {
+    type: String,
+  },
   slug: {
     type: String,
     required: true,

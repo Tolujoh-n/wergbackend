@@ -5,6 +5,9 @@ const pollSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  thumbnailImage: {
+    type: String,
+  },
   description: {
     type: String,
   },

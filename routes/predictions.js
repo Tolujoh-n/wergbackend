@@ -5,6 +5,7 @@ const Poll = require('../models/Poll');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const Trade = require('../models/Trade');
+const WalletLink = require('../models/WalletLink');
 const { auth } = require('../middleware/auth');
 const { ethers } = require('ethers');
 const { payoutToWei, predictionIdToBytes32 } = require('../utils/claimEligibility');
@@ -14,6 +15,34 @@ const {
 } = require('../utils/claimAuth');
 
 const router = express.Router();
+
+function normalizeWalletAddress(addr) {
+  if (!addr) return null;
+  const s = String(addr).trim();
+  if (!s) return null;
+  return s.toLowerCase();
+}
+
+async function assertWalletLinkedToUser({ userId, walletAddress }) {
+  const addr = normalizeWalletAddress(walletAddress);
+  if (!addr) {
+    const err = new Error('walletAddress is required');
+    err.statusCode = 400;
+    throw err;
+  }
+  const link = await WalletLink.findOne({ walletAddress: addr }).lean();
+  if (!link) {
+    const err = new Error('Link a wallet to your account');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (String(link.user) !== String(userId)) {
+    const err = new Error('The wallet address is already associated with another account.');
+    err.statusCode = 409;
+    throw err;
+  }
+  return addr;
+}
 
 // Helper function to get fees from Settings
 async function getFees() {
@@ -244,10 +273,10 @@ router.post('/boost', auth, async (req, res) => {
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
 
-    // Persist wallet address so admin resolve can set claimable balance on-chain
-    if (req.body.walletAddress && String(req.body.walletAddress).trim()) {
-      await User.findByIdAndUpdate(req.user._id, { walletAddress: String(req.body.walletAddress).trim() });
-    }
+    const linkedWallet = await assertWalletLinkedToUser({
+      userId: req.user._id,
+      walletAddress: req.body.walletAddress,
+    });
 
     const existingBoostPrediction = await Prediction.findOne(query);
 
@@ -278,6 +307,7 @@ router.post('/boost', auth, async (req, res) => {
       poll: pollId,
       type: 'boost',
       outcome: outcomeToStore,
+      walletAddress: linkedWallet,
       amount: netStakeAmount, // Store net amount after fees
       totalStake: netStakeAmount, // Initialize total stake (net)
     });
@@ -436,9 +466,10 @@ router.put('/:predictionId', auth, async (req, res) => {
 // Boost: Add or withdraw stake
 router.post('/boost/:predictionId/stake', auth, async (req, res) => {
   try {
-    if (req.body.walletAddress && String(req.body.walletAddress).trim()) {
-      await User.findByIdAndUpdate(req.user._id, { walletAddress: String(req.body.walletAddress).trim() });
-    }
+    const linkedWallet = await assertWalletLinkedToUser({
+      userId: req.user._id,
+      walletAddress: req.body.walletAddress,
+    });
     const { action, amount } = req.body; // action: 'add' or 'withdraw'
 
     if (!['add', 'withdraw'].includes(action)) {
@@ -463,6 +494,14 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     
     if (prediction.type !== 'boost') {
       return res.status(400).json({ message: 'This endpoint is only for boost predictions' });
+    }
+
+    // Ensure stake modifications are performed by the same wallet used for this boost position.
+    if (prediction.walletAddress && normalizeWalletAddress(prediction.walletAddress) !== linkedWallet) {
+      return res.status(403).json({ message: 'Connect the wallet used for this boost position' });
+    }
+    if (!prediction.walletAddress) {
+      prediction.walletAddress = linkedWallet;
     }
     
     // Check if item is still upcoming
@@ -526,9 +565,10 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
 // Market: Buy shares
 router.post('/market/buy', auth, async (req, res) => {
   try {
-    if (req.body.walletAddress && String(req.body.walletAddress).trim()) {
-      await User.findByIdAndUpdate(req.user._id, { walletAddress: String(req.body.walletAddress).trim() });
-    }
+    const linkedWallet = await assertWalletLinkedToUser({
+      userId: req.user._id,
+      walletAddress: req.body.walletAddress,
+    });
     let { matchId, pollId, outcome, amount } = req.body;
     
     if (!matchId && !pollId) {
@@ -674,6 +714,7 @@ router.post('/market/buy', auth, async (req, res) => {
       // Update existing prediction for this option
       prediction.shares = (prediction.shares || 0) + shares;
       prediction.totalInvested = (prediction.totalInvested || 0) + netInvestAmount;
+      if (!prediction.walletAddress) prediction.walletAddress = linkedWallet;
     } else {
       // Create new prediction for this option
       prediction = new Prediction({
@@ -682,6 +723,7 @@ router.post('/market/buy', auth, async (req, res) => {
         poll: pollId,
         type: 'market',
         outcome: normalizedOutcome,
+        walletAddress: linkedWallet,
         shares: shares,
         totalInvested: netInvestAmount,
       });
@@ -1230,15 +1272,23 @@ async function handleClaimAuthorization(req, res) {
       return res.status(400).json({ message: 'Market not resolved or missing marketId' });
     }
 
-    const user = await User.findById(req.user._id);
-    if (!user || !user.walletAddress) {
+    // Must claim with a wallet linked to this account.
+    let signerAddr;
+    try {
+      signerAddr = ethers.getAddress(walletAddress);
+    } catch {
+      return res.status(400).json({ message: 'Invalid walletAddress' });
+    }
+    const addrLower = signerAddr.toLowerCase();
+    const link = await WalletLink.findOne({ walletAddress: addrLower }).lean();
+    if (!link) {
       return res.status(400).json({ message: 'Link a wallet to your account before claiming' });
     }
-
-    const profileAddr = ethers.getAddress(user.walletAddress);
-    const signerAddr = ethers.getAddress(walletAddress);
-    if (profileAddr !== signerAddr) {
+    if (String(link.user) !== String(req.user._id)) {
       return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
+    }
+    if (prediction.walletAddress && normalizeWalletAddress(prediction.walletAddress) !== addrLower) {
+      return res.status(403).json({ message: 'Connect the wallet used for this position' });
     }
 
     const amountWei = payoutToWei(prediction.payout);

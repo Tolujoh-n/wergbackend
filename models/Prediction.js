@@ -23,6 +23,11 @@ const predictionSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // Wallet that executed the on-chain action (boost/market) and will be used for claiming.
+  // Stored lowercase for stable comparisons.
+  walletAddress: {
+    type: String,
+  },
   amount: {
     type: Number,
     default: 0,

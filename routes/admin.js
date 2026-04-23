@@ -7,6 +7,7 @@ const Cup = require('../models/Cup');
 const Stage = require('../models/Stage');
 const Prediction = require('../models/Prediction');
 const User = require('../models/User');
+const WalletLink = require('../models/WalletLink');
 const Blog = require('../models/Blog');
 const Settings = require('../models/Settings');
 const { uploadImage, deleteImage } = require('../utils/cloudinary');
@@ -52,10 +53,20 @@ router.get('/claimable-updates/matches/:id', async (req, res) => {
     for (const p of predsForClaim) {
       const userId = p.user?._id ? p.user._id : p.user;
       if (!userId) continue;
-      const user = await User.findById(userId).select('walletAddress').lean();
-      const walletAddress = user?.walletAddress || (p.user?.walletAddress);
-      if (!walletAddress || !String(walletAddress).trim()) continue;
-      const w = String(walletAddress).trim();
+      const walletAddress = p.walletAddress && String(p.walletAddress).trim()
+        ? String(p.walletAddress).trim()
+        : null;
+      let w = walletAddress ? String(walletAddress).trim() : null;
+      if (!w) {
+        // Backward compatibility: fall back to legacy user.walletAddress or the first linked wallet.
+        const user = await User.findById(userId).select('walletAddress').lean();
+        w = user?.walletAddress ? String(user.walletAddress).trim() : null;
+        if (!w) {
+          const link = await WalletLink.findOne({ user: userId }).select('walletAddress').lean();
+          w = link?.walletAddress ? String(link.walletAddress).trim() : null;
+        }
+      }
+      if (!w) continue;
       const payout = p.payout || 0;
       claimableByWallet[w] = (claimableByWallet[w] || 0) + payout;
       if (p.type === 'boost') {
@@ -92,10 +103,19 @@ router.get('/claimable-updates/polls/:id', async (req, res) => {
     for (const p of predsForClaim) {
       const userId = p.user?._id ? p.user._id : p.user;
       if (!userId) continue;
-      const user = await User.findById(userId).select('walletAddress').lean();
-      const walletAddress = user?.walletAddress || (p.user?.walletAddress);
-      if (!walletAddress || !String(walletAddress).trim()) continue;
-      const w = String(walletAddress).trim();
+      const walletAddress = p.walletAddress && String(p.walletAddress).trim()
+        ? String(p.walletAddress).trim()
+        : null;
+      let w = walletAddress ? String(walletAddress).trim() : null;
+      if (!w) {
+        const user = await User.findById(userId).select('walletAddress').lean();
+        w = user?.walletAddress ? String(user.walletAddress).trim() : null;
+        if (!w) {
+          const link = await WalletLink.findOne({ user: userId }).select('walletAddress').lean();
+          w = link?.walletAddress ? String(link.walletAddress).trim() : null;
+        }
+      }
+      if (!w) continue;
       const payout = p.payout || 0;
       claimableByWallet[w] = (claimableByWallet[w] || 0) + payout;
       if (p.type === 'boost') {
@@ -759,7 +779,7 @@ router.post('/matches/:id/resolve', async (req, res) => {
 // Create Poll with liquidity
 router.post('/polls', async (req, res) => {
   try {
-    const { question, description, type, cup, stage, marketId, marketYesLiquidity, marketNoLiquidity, isFeatured, isSponsored, sponsoredImages, lockedTime, optionType, options, marketInitialized } = req.body;
+    const { question, description, thumbnailImage, type, cup, stage, marketId, marketYesLiquidity, marketNoLiquidity, isFeatured, isSponsored, sponsoredImages, lockedTime, optionType, options, marketInitialized } = req.body;
 
     const cupDoc = typeof cup === 'string' ? await Cup.findById(cup) : await Cup.findOne({ slug: cup });
     if (!cupDoc) {
@@ -774,6 +794,7 @@ router.post('/polls', async (req, res) => {
     const pollData = {
       question,
       description,
+      thumbnailImage: thumbnailImage || undefined,
       type,
       cup: cupDoc._id,
       stage: stageDoc?._id,

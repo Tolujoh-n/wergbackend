@@ -1,6 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const WalletLink = require('../models/WalletLink');
 const { auth } = require('../middleware/auth');
 const { getSendgridConfigured, getSendgridFromEmail } = require('../utils/sendgrid');
 const { generateNumericCode, hashResetCode, buildPasswordResetEmail } = require('../utils/passwordReset');
@@ -22,6 +23,67 @@ async function findUserByEmailCaseInsensitive(email) {
   const safe = escapeRegExp(email.trim());
   const regex = new RegExp(`^${safe}$`, 'i');
   return await User.findOne({ email: regex });
+}
+
+function normalizeWalletAddress(addr) {
+  if (!addr) return null;
+  const s = String(addr).trim();
+  if (!s) return null;
+  return s.toLowerCase();
+}
+
+async function getUserWallets(userId) {
+  const links = await WalletLink.find({ user: userId }).select('walletAddress').lean();
+  return (links || []).map((l) => l.walletAddress).filter(Boolean);
+}
+
+async function toUserResponse(user) {
+  if (!user) return null;
+  const wallets = await getUserWallets(user._id);
+  return {
+    _id: user._id,
+    id: user._id,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    walletAddress: user.walletAddress, // legacy field (may be null)
+    wallets,
+  };
+}
+
+async function ensureLegacyWalletLink(user) {
+  const legacy = normalizeWalletAddress(user?.walletAddress);
+  if (!legacy) return;
+  const existing = await WalletLink.findOne({ walletAddress: legacy }).lean();
+  if (existing) return;
+  await WalletLink.create({ walletAddress: legacy, user: user._id });
+}
+
+async function linkWalletToUser({ userId, address }) {
+  const walletAddress = normalizeWalletAddress(address);
+  if (!walletAddress) {
+    const err = new Error('walletAddress is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existing = await WalletLink.findOne({ walletAddress }).lean();
+  if (existing && String(existing.user) !== String(userId)) {
+    const err = new Error('WALLET_IN_USE');
+    err.statusCode = 409;
+    err.ownerUserId = existing.user;
+    throw err;
+  }
+  if (!existing) {
+    await WalletLink.create({ walletAddress, user: userId });
+  }
+
+  // Best-effort: if legacy field is empty, set it to first linked wallet for compatibility.
+  const u = await User.findById(userId).select('walletAddress').lean();
+  if (!u?.walletAddress) {
+    await User.findByIdAndUpdate(userId, { walletAddress }, { new: false });
+  }
+  return walletAddress;
 }
 
 // Signup with email/password
@@ -54,7 +116,7 @@ router.post('/signup', async (req, res) => {
     await user.save();
 
     const token = generateToken(user._id);
-    res.json({ token, user: { id: user._id, username: user.username, email: user.email, role: user.role } });
+    res.json({ token, user: await toUserResponse(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -89,7 +151,8 @@ router.post('/login', async (req, res) => {
     }
 
     const token = generateToken(user._id);
-    res.json({ token, user: { id: user._id, username: user.username, email: user.email, role: user.role } });
+    await ensureLegacyWalletLink(user);
+    res.json({ token, user: await toUserResponse(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -223,15 +286,30 @@ router.post('/password-reset/confirm', async (req, res) => {
 router.post('/wallet-login', async (req, res) => {
   try {
     const { address } = req.body;
-    const walletAddress = address.toLowerCase();
-
-    let user = await User.findOne({ walletAddress });
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    const walletAddress = normalizeWalletAddress(address);
+    if (!walletAddress) {
+      return res.status(400).json({ message: 'address is required' });
     }
 
+    // First: resolve via wallet link table (supports multiple wallets per user)
+    let link = await WalletLink.findOne({ walletAddress }).lean();
+    let user = null;
+    if (link?.user) {
+      user = await User.findById(link.user);
+    }
+
+    // Backward compatibility: if still not found, try legacy User.walletAddress and create link.
+    if (!user) {
+      user = await User.findOne({ walletAddress });
+      if (user) {
+        await ensureLegacyWalletLink(user);
+      }
+    }
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
     const token = generateToken(user._id);
-    res.json({ token, user: { id: user._id, username: user.username, walletAddress: user.walletAddress, role: user.role } });
+    res.json({ token, user: await toUserResponse(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -241,22 +319,97 @@ router.post('/wallet-login', async (req, res) => {
 router.post('/wallet-signup', async (req, res) => {
   try {
     const { address } = req.body;
-    const walletAddress = address.toLowerCase();
+    const walletAddress = normalizeWalletAddress(address);
+    if (!walletAddress) {
+      return res.status(400).json({ message: 'address is required' });
+    }
 
-    let user = await User.findOne({ walletAddress });
-    if (user) {
-      const token = generateToken(user._id);
-      return res.json({ token, user: { id: user._id, username: user.username, walletAddress: user.walletAddress, role: user.role } });
+    // If already linked, return the associated user (don't create duplicates)
+    const existingLink = await WalletLink.findOne({ walletAddress }).lean();
+    if (existingLink?.user) {
+      const existingUser = await User.findById(existingLink.user);
+      if (existingUser) {
+        const token = generateToken(existingUser._id);
+        return res.json({ token, user: await toUserResponse(existingUser) });
+      }
     }
 
     const username = `user_${walletAddress.slice(0, 8)}`;
-    user = new User({ walletAddress, username });
+    const user = new User({ walletAddress, username });
     await user.save();
+    await WalletLink.create({ walletAddress, user: user._id });
 
     const token = generateToken(user._id);
-    res.json({ token, user: { id: user._id, username: user.username, walletAddress: user.walletAddress, role: user.role } });
+    res.json({ token, user: await toUserResponse(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Check if a wallet can be linked (or is already linked to current user)
+router.post('/wallets/check', auth, async (req, res) => {
+  try {
+    const walletAddress = normalizeWalletAddress(req.body?.address || req.body?.walletAddress);
+    if (!walletAddress) return res.status(400).json({ message: 'address is required' });
+
+    const existing = await WalletLink.findOne({ walletAddress }).lean();
+    if (!existing) {
+      return res.json({ ok: true, status: 'available' });
+    }
+    if (String(existing.user) === String(req.user._id)) {
+      return res.json({ ok: true, status: 'linked_to_me' });
+    }
+    return res.status(409).json({
+      ok: false,
+      status: 'in_use',
+      message: 'The wallet address is already associated with another account.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Link a wallet to the authenticated account (email user can have multiple wallets)
+router.post('/wallets/link', auth, async (req, res) => {
+  try {
+    const address = req.body?.address || req.body?.walletAddress;
+    const walletAddress = await linkWalletToUser({ userId: req.user._id, address });
+    const user = await User.findById(req.user._id);
+    return res.json({ ok: true, walletAddress, user: await toUserResponse(user) });
+  } catch (error) {
+    if (error?.statusCode === 409 && error?.message === 'WALLET_IN_USE') {
+      return res.status(409).json({
+        ok: false,
+        status: 'in_use',
+        message: 'The wallet address is already associated with another account.',
+      });
+    }
+    return res.status(error?.statusCode || 500).json({ message: error.message || 'Failed to link wallet' });
+  }
+});
+
+// Unlink a wallet from the authenticated account
+router.post('/wallets/unlink', auth, async (req, res) => {
+  try {
+    const walletAddress = normalizeWalletAddress(req.body?.address || req.body?.walletAddress);
+    if (!walletAddress) return res.status(400).json({ message: 'address is required' });
+
+    const existing = await WalletLink.findOne({ walletAddress }).lean();
+    if (!existing) return res.json({ ok: true, removed: false });
+    if (String(existing.user) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Not authorized to unlink this wallet' });
+    }
+    await WalletLink.deleteOne({ walletAddress });
+
+    // If this wallet was stored in legacy field, clear it (best-effort)
+    const u = await User.findById(req.user._id).select('walletAddress').lean();
+    if (u?.walletAddress && normalizeWalletAddress(u.walletAddress) === walletAddress) {
+      await User.findByIdAndUpdate(req.user._id, { walletAddress: null });
+    }
+
+    return res.json({ ok: true, removed: true });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 });
 
@@ -264,7 +417,8 @@ router.post('/wallet-signup', async (req, res) => {
 router.get('/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    res.json({ user });
+    await ensureLegacyWalletLink(user);
+    res.json({ user: await toUserResponse(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

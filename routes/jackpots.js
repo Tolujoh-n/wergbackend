@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { ethers } = require('ethers');
 const { auth } = require('../middleware/auth');
 const User = require('../models/User');
+const WalletLink = require('../models/WalletLink');
 const { payoutToWei } = require('../utils/claimEligibility');
 const {
   getClaimSignerAddress,
@@ -14,6 +15,13 @@ const Poll = require('../models/Poll');
 const Cup = require('../models/Cup');
 
 const router = express.Router();
+
+function normalizeWalletAddress(addr) {
+  if (!addr) return null;
+  const s = String(addr).trim();
+  if (!s) return null;
+  return s.toLowerCase();
+}
 
 // Get jackpots
 router.get('/', async (req, res) => {
@@ -547,13 +555,18 @@ router.post('/withdraw/authorization', auth, async (req, res) => {
       return res.status(400).json({ message: 'Insufficient jackpot balance' });
     }
 
-    if (!user.walletAddress) {
+    let reqAddr;
+    try {
+      reqAddr = ethers.getAddress(walletAddress);
+    } catch {
+      return res.status(400).json({ message: 'Invalid walletAddress' });
+    }
+    const addrLower = normalizeWalletAddress(reqAddr);
+    const link = await WalletLink.findOne({ walletAddress: addrLower }).lean();
+    if (!link) {
       return res.status(400).json({ message: 'Link a wallet to your account' });
     }
-
-    const profileAddr = ethers.getAddress(user.walletAddress);
-    const reqAddr = ethers.getAddress(walletAddress);
-    if (profileAddr !== reqAddr) {
+    if (String(link.user) !== String(req.user._id)) {
       return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
     }
 

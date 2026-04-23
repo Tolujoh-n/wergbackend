@@ -1,4 +1,4 @@
-# Admin and supper admin
+# Admin and supper admin..
 
 Create admin account:
 `npm run create:privileged-user -- --role admin --username admin2 --email admin2@wergame.com --password "StrongPass123"`

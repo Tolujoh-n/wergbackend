@@ -3,6 +3,7 @@ const { auth, isSuperAdmin } = require('../middleware/auth');
 const Settings = require('../models/Settings');
 const Match = require('../models/Match');
 const Poll = require('../models/Poll');
+const SuperAdminTransaction = require('../models/SuperAdminTransaction');
 
 const router = express.Router();
 
@@ -28,6 +29,70 @@ router.get('/get-fees', async (req, res) => {
 // All other superadmin routes require authentication and superAdmin role
 router.use(auth);
 router.use(isSuperAdmin);
+
+// Log a super admin contract transaction/action
+router.post('/transactions', async (req, res) => {
+  try {
+    const {
+      action,
+      txHash,
+      chainId,
+      ethAmount,
+      usdAmount,
+      ethUsd,
+      meta,
+    } = req.body || {};
+
+    if (!action || !String(action).trim()) {
+      return res.status(400).json({ message: 'action is required' });
+    }
+
+    const doc = new SuperAdminTransaction({
+      actor: req.user._id,
+      action: String(action).trim(),
+      txHash: txHash ? String(txHash).trim() : undefined,
+      chainId: chainId != null ? Number(chainId) : undefined,
+      ethAmount: ethAmount != null && ethAmount !== '' ? Number(ethAmount) : undefined,
+      usdAmount: usdAmount != null && usdAmount !== '' ? Number(usdAmount) : undefined,
+      ethUsd: ethUsd != null && ethUsd !== '' ? Number(ethUsd) : undefined,
+      meta: meta && typeof meta === 'object' ? meta : {},
+    });
+
+    await doc.save();
+    await doc.populate('actor', 'username walletAddress role');
+    res.status(201).json(doc);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get super admin transactions (paginated)
+router.get('/transactions', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const [total, rows] = await Promise.all([
+      SuperAdminTransaction.countDocuments(),
+      SuperAdminTransaction.find()
+        .populate('actor', 'username walletAddress role')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+    ]);
+
+    res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      rows,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
 
 // Set fees
 router.post('/set-fees', async (req, res) => {
