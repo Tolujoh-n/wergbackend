@@ -45,6 +45,7 @@ app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/stages', require('./routes/stages'));
 app.use('/api/blogs', require('./routes/blogs'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/newsletter', require('./routes/newsletter'));
 app.use('/api/comments', require('./routes/comments'));
 app.use('/api/eth-price', ethPriceRouter);
 app.use('/api/relayer', require('./routes/relayer'));

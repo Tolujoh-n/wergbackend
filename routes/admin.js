@@ -10,6 +10,7 @@ const User = require('../models/User');
 const WalletLink = require('../models/WalletLink');
 const Blog = require('../models/Blog');
 const Settings = require('../models/Settings');
+const NewsletterSubscriber = require('../models/NewsletterSubscriber');
 const { uploadImage, deleteImage } = require('../utils/cloudinary');
 const { scheduleMarketMakerSeed } = require('../services/marketMakerQuotes');
 const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
@@ -1734,6 +1735,73 @@ router.post('/polls/:id/boost-pool', async (req, res) => {
     res.json({ boostPool: doc.boostPool });
   } catch (e) {
     res.status(e.statusCode || 500).json({ message: e.message });
+  }
+});
+
+// Newsletter subscribers
+router.get('/newsletter', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const skip = (page - 1) * limit;
+    const search = String(req.query.search || '').trim().toLowerCase();
+
+    const filter = search ? { email: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } } : {};
+
+    const [items, total] = await Promise.all([
+      NewsletterSubscriber.find(filter).sort({ subscribedAt: -1 }).skip(skip).limit(limit).lean(),
+      NewsletterSubscriber.countDocuments(filter),
+    ]);
+
+    res.json({
+      items,
+      total,
+      page,
+      pages: Math.max(1, Math.ceil(total / limit)),
+      limit,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/newsletter/export', async (req, res) => {
+  try {
+    const subscribers = await NewsletterSubscriber.find().sort({ subscribedAt: -1 }).lean();
+    const escapeCsv = (val) => {
+      const s = String(val ?? '');
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const header = 'email,source,subscribedAt\n';
+    const rows = subscribers
+      .map((s) =>
+        [
+          escapeCsv(s.email),
+          escapeCsv(s.source || ''),
+          escapeCsv(s.subscribedAt ? new Date(s.subscribedAt).toISOString() : ''),
+        ].join(',')
+      )
+      .join('\n');
+
+    const filename = `newsletter-subscribers-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + header + rows);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/newsletter/:id', async (req, res) => {
+  try {
+    const deleted = await NewsletterSubscriber.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ message: 'Subscriber not found' });
+    }
+    res.json({ message: 'Subscriber removed' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 
