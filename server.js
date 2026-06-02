@@ -23,8 +23,8 @@ app.use(cors({
   origin: [
     'https://wergtest-enn.vercel.app',
     'http://localhost:3000',
-    'https://www.wergame.io',
-    'http://www.wergame.io',
+    'https://wergame.io',
+    'http://wergame.io',
     'http://localhost:8080'
   ],
   credentials: true
