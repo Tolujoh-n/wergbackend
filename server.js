@@ -25,6 +25,8 @@ app.use(cors({
     'http://localhost:3000',
     'https://wergame.io',
     'http://wergame.io',
+    'https://www.wergame.io',
+    'http://www.wergame.io',
     'http://localhost:8080'
   ],
   credentials: true
