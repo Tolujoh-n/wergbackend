@@ -15,7 +15,7 @@ const {
   pendingVaultDebitForWallet,
   openBuyOrderReservedUsd,
 } = require('../services/orderbookService');
-const { runMatchMmTick, runPollMmTick, scheduleMarketMakerSeed } = require('../services/marketMakerQuotes');
+const { runMatchMmTick, runPollMmTick, scheduleMarketMakerSeed, forceRequoteMarketMm } = require('../services/marketMakerQuotes');
 const { withOrderbookContract } = require('../utils/orderbookContractScope');
 
 const router = express.Router();
@@ -31,7 +31,63 @@ function sanitizeAdminOrderbookBody(body) {
   delete b.mmWidenActiveYes;
   delete b.mmWidenActiveNo;
   delete b.botLastTickAt;
+  delete b.startingPrices;
+  if (Array.isArray(b.pauseByOption)) {
+    b.pauseByOption = b.pauseByOption.map((row) => ({
+      optionKey: String(row?.optionKey || '').trim(),
+      pauseYes: !!row?.pauseYes,
+      pauseNo: !!row?.pauseNo,
+    })).filter((row) => row.optionKey);
+  }
   return b;
+}
+
+function normalizeStartingPrices(rows) {
+  if (!Array.isArray(rows)) return null;
+  const out = rows
+    .map((row) => {
+      const optionKey = String(row?.optionKey || '').trim();
+      const yesPrice = Math.max(0.01, Math.min(0.99, Number(row?.yesPrice) || 0.5));
+      const noPrice = Math.max(0.01, Math.min(0.99, Number(row?.noPrice) || 0.5));
+      if (!optionKey) return null;
+      if (yesPrice + noPrice > 1.0001) {
+        const err = new Error(`YES + NO prices for "${optionKey}" must sum to at most 1`);
+        err.statusCode = 400;
+        throw err;
+      }
+      return { optionKey, yesPrice, noPrice };
+    })
+    .filter(Boolean);
+  return out;
+}
+
+function startingPricesChanged(before, after) {
+  return JSON.stringify(before || []) !== JSON.stringify(after || []);
+}
+
+async function applyAdminMarketUpdate(doc, kind, body) {
+  const startingPrices = normalizeStartingPrices(body?.startingPrices);
+  const orderbookBody = { ...(body || {}) };
+  delete orderbookBody.startingPrices;
+
+  const prevPrices = doc.startingPrices || [];
+  doc.orderbook = { ...(doc.orderbook || {}), ...sanitizeAdminOrderbookBody(orderbookBody) };
+  if (startingPrices) {
+    doc.startingPrices = startingPrices;
+  }
+  await doc.save();
+
+  if (!doc.marketId) {
+    return { pricesChanged: false };
+  }
+
+  const pricesChanged = startingPrices ? startingPricesChanged(prevPrices, startingPrices) : false;
+  if (pricesChanged) {
+    await forceRequoteMarketMm(doc, kind);
+  } else {
+    scheduleMarketMakerSeed({ kind, id: doc._id });
+  }
+  return { pricesChanged };
 }
 
 router.get('/defaults', async (req, res) => {
@@ -207,11 +263,11 @@ router.put('/matches/:id', async (req, res) => {
   try {
     const m = await Match.findById(req.params.id);
     if (!m) return res.status(404).json({ message: 'Match not found' });
-    m.orderbook = { ...(m.orderbook || {}), ...sanitizeAdminOrderbookBody(req.body) };
-    await m.save();
-    res.json({ item: m, control: await controlView(m.orderbook) });
+    await applyAdminMarketUpdate(m, 'match', req.body);
+    const fresh = await Match.findById(req.params.id);
+    res.json({ item: fresh, control: await controlView(fresh.orderbook) });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    res.status(e.statusCode || 500).json({ message: e.message });
   }
 });
 
@@ -229,14 +285,11 @@ router.put('/polls/:id', async (req, res) => {
   try {
     const p = await Poll.findById(req.params.id);
     if (!p) return res.status(404).json({ message: 'Poll not found' });
-    p.orderbook = { ...(p.orderbook || {}), ...sanitizeAdminOrderbookBody(req.body) };
-    await p.save();
-    if (p.marketId) {
-      scheduleMarketMakerSeed({ kind: 'poll', id: p._id });
-    }
-    res.json({ item: p, control: await controlView(p.orderbook) });
+    await applyAdminMarketUpdate(p, 'poll', req.body);
+    const fresh = await Poll.findById(req.params.id);
+    res.json({ item: fresh, control: await controlView(fresh.orderbook) });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    res.status(e.statusCode || 500).json({ message: e.message });
   }
 });
 

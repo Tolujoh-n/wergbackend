@@ -263,16 +263,37 @@ function assertTradable(item) {
   }
 }
 
-function assertSideNotPaused(item, side) {
+function getOptionPauseFlags(ob, optionKey) {
+  const list = ob?.pauseByOption || [];
+  const row = list.find((r) => String(r.optionKey) === String(optionKey));
+  return {
+    pauseYes: !!(row?.pauseYes),
+    pauseNo: !!(row?.pauseNo),
+  };
+}
+
+function isOptionSidePaused(ob, optionKey, side) {
+  if (!ob) return false;
+  const perOpt = optionKey ? getOptionPauseFlags(ob, optionKey) : { pauseYes: false, pauseNo: false };
+  if (side === 'YES') {
+    return !!(ob.pauseSideYes || ob.riskPausedYes || perOpt.pauseYes);
+  }
+  if (side === 'NO') {
+    return !!(ob.pauseSideNo || ob.riskPausedNo || perOpt.pauseNo);
+  }
+  return false;
+}
+
+function assertSideNotPaused(item, side, optionKey) {
   const ob = item.orderbook || {};
   if (ob.marketPaused || ob.riskPausedMarket) {
     throw Object.assign(new Error('Market is paused'), { statusCode: 400 });
   }
-  if (side === 'YES' && (ob.pauseSideYes || ob.riskPausedYes)) {
-    throw Object.assign(new Error('YES side paused'), { statusCode: 400 });
-  }
-  if (side === 'NO' && (ob.pauseSideNo || ob.riskPausedNo)) {
-    throw Object.assign(new Error('NO side paused'), { statusCode: 400 });
+  if (isOptionSidePaused(ob, optionKey, side)) {
+    throw Object.assign(
+      new Error(optionKey ? `${side} side paused for ${optionKey}` : `${side} side paused`),
+      { statusCode: 400 }
+    );
   }
 }
 
@@ -509,7 +530,7 @@ async function placeOrder(payload) {
     console.warn('orderbook risk sync:', e.message || e);
   }
   assertTradable(item);
-  assertSideNotPaused(item, side);
+  assertSideNotPaused(item, side, optionKey);
 
   const contractLower = orderbookContractAddressLower();
   if (!contractLower) {
@@ -528,15 +549,27 @@ async function placeOrder(payload) {
   if (orderKind === 'market') {
     const oppositeDir = direction === 'buy' ? 'sell' : 'buy';
     const sort = direction === 'buy' ? { limitPrice: 1 } : { limitPrice: -1 };
-    const best = await Order.findOne(
-      withOrderbookContract({
-        chainMarketId: item.marketId,
-        optionKey,
-        side,
-        direction: oppositeDir,
-        status: { $in: ['open', 'partially_filled'] },
-      })
-    ).sort(sort);
+    const findBest = () =>
+      Order.findOne(
+        withOrderbookContract({
+          chainMarketId: item.marketId,
+          optionKey,
+          side,
+          direction: oppositeDir,
+          status: { $in: ['open', 'partially_filled'] },
+        })
+      ).sort(sort);
+
+    let best = await findBest();
+    if (!best && !isMarketMaker) {
+      try {
+        const { ensureQuotesForDoc } = require('./marketMakerQuotes');
+        await ensureQuotesForDoc(item, kind);
+        best = await findBest();
+      } catch (e) {
+        console.warn('orderbook mm top-up before market order:', e.message || e);
+      }
+    }
     if (!best) {
       throw Object.assign(new Error('No liquidity to match market order'), { statusCode: 400 });
     }
@@ -725,7 +758,20 @@ async function placeOrder(payload) {
       );
     } catch (e) {
       console.error('orderbook immediate position ledger:', e.message || e);
+      throw Object.assign(new Error('Position update failed after trade'), {
+        statusCode: 500,
+        code: 'LEDGER_APPLY_FAILED',
+      });
     }
+  }
+
+  if (!isMarketMaker && orderKind === 'market') {
+    setImmediate(() => {
+      const { ensureQuotesForDoc } = require('./marketMakerQuotes');
+      ensureQuotesForDoc(item, kind).catch((e) => {
+        console.warn('orderbook mm replenish after market order:', e.message || e);
+      });
+    });
   }
 
   try {
@@ -883,6 +929,8 @@ module.exports = {
   loadItem,
   assertTradable,
   assertSideNotPaused,
+  isOptionSidePaused,
+  getOptionPauseFlags,
   runMatch,
   buildSettlementLegs,
   estimateBuyLimitVaultNeedUsd,

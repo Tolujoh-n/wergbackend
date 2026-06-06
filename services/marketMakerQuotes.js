@@ -15,6 +15,7 @@ const {
   getFees,
   orderSideBookKey,
   sellBookCacheForKeys,
+  isOptionSidePaused,
 } = require('./orderbookService');
 const { isCrossingOrder } = require('./orderbookTradingPanel');
 
@@ -253,8 +254,7 @@ async function absorbUserCrossingAndPartialOrders({
     if (remaining <= 1e-9) continue;
 
     const side = o.side;
-    if (side === 'YES' && riskPausedYes) continue;
-    if (side === 'NO' && riskPausedNo) continue;
+    if (isOptionSidePaused(ob, o.optionKey, side)) continue;
 
     const bookPrices = await bookPricesFor(o.optionKey, side);
     const crossing = isCrossingOrder(o, bookPrices);
@@ -410,6 +410,36 @@ async function mmTreasuryMarkToMidLossUsdc({ chainMarketId, mmWalletLower }) {
     sum += Math.max(0, inv - shares * m);
   }
   return sum;
+}
+
+async function cancelMmQuotesForOptionSide(chainMarketId, mmWalletLower, optionKey, side) {
+  await Order.updateMany(
+    withOrderbookContract({
+      chainMarketId,
+      walletAddress: mmWalletLower,
+      isMarketMaker: true,
+      optionKey,
+      side,
+      status: { $in: ['open', 'partially_filled', 'pending'] },
+    }),
+    { $set: { status: 'cancelled', reservedCollateral: 0, sizeRemaining: 0 } }
+  );
+}
+
+/** Cancel all MM resting quotes for a market, then repost from current startingPrices / controls. */
+async function forceRequoteMarketMm(doc, kind) {
+  const actor = await getMarketMakerActor();
+  if (!actor || !doc?.marketId) {
+    return { skipped: true, reason: 'MM actor or marketId missing' };
+  }
+  const mmWalletLower = String(actor.walletAddress).toLowerCase();
+  const optionKeys = kind === 'match' ? matchOptionKeys(doc) : pollOptionKeys(doc);
+  for (const optionKey of optionKeys) {
+    for (const side of ['YES', 'NO']) {
+      await cancelMmQuotesForOptionSide(doc.marketId, mmWalletLower, optionKey, side);
+    }
+  }
+  return ensureQuotesForDoc(doc, kind);
 }
 
 async function cancelMmQuotesForChainSide(chainMarketId, mmWalletLower, side) {
@@ -609,8 +639,7 @@ async function ensureQuotesForDoc(doc, kind) {
 
   for (const optionKey of optionKeys) {
     for (const side of ['YES', 'NO']) {
-      if (side === 'YES' && riskPausedYes) continue;
-      if (side === 'NO' && riskPausedNo) continue;
+      if (isOptionSidePaused(ob, optionKey, side)) continue;
 
       const widen = side === 'YES' ? yesWiden : noWiden;
       const spreadMult = widen ? 2.5 : 1;
@@ -825,5 +854,6 @@ module.exports = {
   getMarketMakerActor,
   syncOrderbookRiskToDb,
   refreshOrderbookRiskState,
+  forceRequoteMarketMm,
   LEVELS,
 };

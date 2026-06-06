@@ -52,7 +52,7 @@ function isCrossingOrder(order, bookPrices) {
   return false;
 }
 
-/** Merge DB positions with filled buy size from orders (so partial fills show before ledger catches up). */
+/** Merge DB positions with filled buy size from orders (only when ledger hasn't caught up yet). */
 function buildPositionRows(positions, orders) {
   const byKey = new Map();
 
@@ -72,6 +72,7 @@ function buildPositionRows(positions, orders) {
 
   for (const o of orders) {
     const filled = Number(o.sizeFilled) || 0;
+    const remaining = Number(o.sizeRemaining) || 0;
     if (filled <= 1e-9) continue;
     const pk = positionKey(o.optionKey, o.side);
     const row = byKey.get(pk) || {
@@ -82,8 +83,11 @@ function buildPositionRows(positions, orders) {
       totalInvested: 0,
       pendingShares: 0,
     };
-    if (o.direction === 'buy') {
-      row.shares = Math.max(row.shares, filled);
+    const posShares = row.shares;
+    const fillNotInPositionYet =
+      o.direction === 'buy' && posShares + 1e-6 < filled && remaining <= 1e-9;
+    if (fillNotInPositionYet) {
+      row.shares = Math.max(posShares, filled);
     }
     byKey.set(pk, row);
   }

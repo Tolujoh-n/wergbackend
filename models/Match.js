@@ -167,6 +167,14 @@ const matchSchema = new mongoose.Schema({
     marketPaused: { type: Boolean, default: false },
     pauseSideYes: { type: Boolean, default: false },
     pauseSideNo: { type: Boolean, default: false },
+    /** Per-outcome YES/NO pause (stacks with global pauseSide*). */
+    pauseByOption: [
+      {
+        optionKey: { type: String },
+        pauseYes: { type: Boolean, default: false },
+        pauseNo: { type: Boolean, default: false },
+      },
+    ],
     spreadBps: { type: Number, default: 80 },
     minSpreadFloorBps: { type: Number, default: 20 },
     quoteSizeUsdc: { type: Number, default: 50 },
