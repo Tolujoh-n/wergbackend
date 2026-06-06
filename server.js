@@ -14,6 +14,7 @@ const {
   processSettlementOutboxBatch,
   releaseStaleProcessingJobs,
 } = require('./services/settlementOutbox');
+const { migrateOrderbookPositionLedger } = require('./utils/orderbookPositionLedger');
 const { processAllDueGoldenTicketGrants } = require('./services/goldenTicketDailyGrantService');
 
 const app = express();
@@ -80,8 +81,13 @@ const PORT = process.env.PORT || 5000;
 
 mongoose
   .connect(process.env.MONGODB_URI || '')
-  .then(() => {
+  .then(async () => {
     console.log('MongoDB connected');
+    try {
+      await migrateOrderbookPositionLedger();
+    } catch (e) {
+      console.warn('[orderbook] position ledger migration:', e.message || e);
+    }
     updateEthPrice();
     cron.schedule('*/5 * * * *', async () => {
       console.log('Updating USDC price from CoinGecko...');

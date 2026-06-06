@@ -52,47 +52,26 @@ function isCrossingOrder(order, bookPrices) {
   return false;
 }
 
-/** Merge DB positions with filled buy size from orders (only when ledger hasn't caught up yet). */
-function buildPositionRows(positions, orders) {
-  const byKey = new Map();
-
+/** Position rows from the ledger only (do not resurrect closed positions from old filled orders). */
+function buildPositionRows(positions) {
+  const rows = [];
   for (const p of positions) {
     const pk = String(p.positionKey || '');
     const [optionKey, side] = pk.split('|');
-    byKey.set(pk, {
+    const shares = Number(p.shares) || 0;
+    const totalInvested = Number(p.totalInvested) || 0;
+    if (!(shares > 1e-9) && !(totalInvested > 1e-9)) continue;
+    rows.push({
       positionKey: pk,
       optionKey: optionKey || p.optionKey,
       side: side || p.side,
-      shares: Number(p.shares) || 0,
-      totalInvested: Number(p.totalInvested) || 0,
+      shares,
+      totalInvested,
       pendingShares: 0,
       updatedAt: p.updatedAt,
     });
   }
-
-  for (const o of orders) {
-    const filled = Number(o.sizeFilled) || 0;
-    const remaining = Number(o.sizeRemaining) || 0;
-    if (filled <= 1e-9) continue;
-    const pk = positionKey(o.optionKey, o.side);
-    const row = byKey.get(pk) || {
-      positionKey: pk,
-      optionKey: o.optionKey,
-      side: o.side,
-      shares: 0,
-      totalInvested: 0,
-      pendingShares: 0,
-    };
-    const posShares = row.shares;
-    const fillNotInPositionYet =
-      o.direction === 'buy' && posShares + 1e-6 < filled && remaining <= 1e-9;
-    if (fillNotInPositionYet) {
-      row.shares = Math.max(posShares, filled);
-    }
-    byKey.set(pk, row);
-  }
-
-  return [...byKey.values()].filter((r) => r.shares > 1e-9 || r.totalInvested > 1e-9);
+  return rows;
 }
 
 async function getUserTradingPanel(userId, chainMarketId) {
@@ -213,7 +192,7 @@ async function getUserTradingPanel(userId, chainMarketId) {
     }
   }
 
-  const positionRows = buildPositionRows(positions, orders);
+  const positionRows = buildPositionRows(positions);
 
   return {
     userId: String(scope.userId),

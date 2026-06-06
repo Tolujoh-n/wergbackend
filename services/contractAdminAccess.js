@@ -1,5 +1,6 @@
 const { ethers } = require('ethers');
 const WalletLink = require('../models/WalletLink');
+const User = require('../models/User');
 const { getContractAddress, getJsonRpcProvider } = require('../utils/chainConfig');
 const { getWeRgameAbiSync } = require('../utils/wergameContractAbi');
 
@@ -43,6 +44,23 @@ function dbRoleHasAdminAccess(role) {
   return role === 'admin' || role === 'superAdmin';
 }
 
+/** All wallet addresses associated with a user (WalletLink + legacy field). */
+async function getWalletAddressesForUser(user) {
+  const seen = new Set();
+  const out = [];
+  const links = await WalletLink.find({ user: user._id }).select('walletAddress').lean();
+  for (const link of links) {
+    const w = norm(link.walletAddress);
+    if (w && !seen.has(w)) {
+      seen.add(w);
+      out.push(w);
+    }
+  }
+  const legacy = norm(user.walletAddress);
+  if (legacy && !seen.has(legacy)) out.push(legacy);
+  return out;
+}
+
 /**
  * True if user has DB admin/superAdmin role OR any linked wallet is on-chain admin.
  */
@@ -50,20 +68,28 @@ async function userHasAdminAccess(user) {
   if (!user) return false;
   if (dbRoleHasAdminAccess(user.role)) return true;
 
-  const links = await WalletLink.find({ user: user._id }).select('walletAddress').lean();
-  for (const link of links) {
-    if (await isWalletOnChainAdmin(link.walletAddress)) return true;
+  const contractAddr = getContractAddress();
+  if (!contractAddr) {
+    console.warn('contractAdminAccess: CONTRACT_ADDRESS not set — on-chain admin check skipped');
+    return false;
+  }
+
+  const wallets = await getWalletAddressesForUser(user);
+  for (const w of wallets) {
+    if (await isWalletOnChainAdmin(w)) return true;
   }
   return false;
 }
 
 /** Wallets linked to this user that are on-chain admins. */
 async function contractAdminWalletsForUser(userId) {
-  const links = await WalletLink.find({ user: userId }).select('walletAddress').lean();
+  const u = await User.findById(userId).select('walletAddress').lean();
+  const user = { _id: userId, walletAddress: u?.walletAddress || null };
+
   const out = [];
-  for (const link of links) {
-    const w = link.walletAddress;
-    if (w && (await isWalletOnChainAdmin(w))) out.push(w);
+  const wallets = await getWalletAddressesForUser(user);
+  for (const w of wallets) {
+    if (await isWalletOnChainAdmin(w)) out.push(w);
   }
   return out;
 }
@@ -75,6 +101,7 @@ function clearAdminCacheForWallet(walletAddress) {
 
 module.exports = {
   isWalletOnChainAdmin,
+  getWalletAddressesForUser,
   userHasAdminAccess,
   contractAdminWalletsForUser,
   clearAdminCacheForWallet,

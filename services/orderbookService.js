@@ -284,14 +284,24 @@ function isOptionSidePaused(ob, optionKey, side) {
   return false;
 }
 
-function assertSideNotPaused(item, side, optionKey) {
+function assertSideNotPaused(item, side, optionKey, opts = {}) {
+  const { direction = 'buy', isMarketMaker = false } = opts;
   const ob = item.orderbook || {};
-  if (ob.marketPaused || ob.riskPausedMarket) {
-    throw Object.assign(new Error('Market is paused'), { statusCode: 400 });
+  const sidePaused = isOptionSidePaused(ob, optionKey, side);
+  const marketPausedForBuys = !!(ob.marketPaused || ob.riskPausedMarket);
+
+  // Users closing positions may always sell (reduces treasury exposure).
+  if (direction === 'sell' && !isMarketMaker) return;
+
+  // MM bids provide exit liquidity even when buys are paused.
+  if (isMarketMaker && direction === 'buy') return;
+
+  if (marketPausedForBuys) {
+    throw Object.assign(new Error('Market is paused for new buys'), { statusCode: 400 });
   }
-  if (isOptionSidePaused(ob, optionKey, side)) {
+  if (sidePaused) {
     throw Object.assign(
-      new Error(optionKey ? `${side} side paused for ${optionKey}` : `${side} side paused`),
+      new Error(optionKey ? `${side} side paused for new buys on ${optionKey}` : `${side} side paused for new buys`),
       { statusCode: 400 }
     );
   }
@@ -530,7 +540,7 @@ async function placeOrder(payload) {
     console.warn('orderbook risk sync:', e.message || e);
   }
   assertTradable(item);
-  assertSideNotPaused(item, side, optionKey);
+  assertSideNotPaused(item, side, optionKey, { direction, isMarketMaker: !!isMarketMaker });
 
   const contractLower = orderbookContractAddressLower();
   if (!contractLower) {
@@ -627,7 +637,7 @@ async function placeOrder(payload) {
   if (direction === 'sell') {
     const pk = positionKey(optionKey, side);
     const pos = await OrderbookPosition.findOne(
-      withOrderbookContract({
+      withOrderbookContractOrLegacy({
         walletAddress: w,
         chainMarketId: item.marketId,
         positionKey: pk,
@@ -765,11 +775,11 @@ async function placeOrder(payload) {
     }
   }
 
-  if (!isMarketMaker && orderKind === 'market') {
+  if (!isMarketMaker) {
     setImmediate(() => {
       const { ensureQuotesForDoc } = require('./marketMakerQuotes');
       ensureQuotesForDoc(item, kind).catch((e) => {
-        console.warn('orderbook mm replenish after market order:', e.message || e);
+        console.warn('orderbook mm/risk refresh after user order:', e.message || e);
       });
     });
   }

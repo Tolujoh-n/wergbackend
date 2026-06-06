@@ -7,6 +7,7 @@ const WalletLink = require('../models/WalletLink');
 const OrderbookPosition = require('../models/OrderbookPosition');
 const { applyOrderbookSettlementsOnChain } = require('../utils/settlementRelay');
 const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
+const { applyLegToOrderbookPosition } = require('../utils/orderbookPositionLedger');
 const { getResolvedChainMarketIdSet } = require('../utils/resolvedMarkets');
 
 const USDC_DECIMALS = parseInt(process.env.USDC_DECIMALS || '6', 10);
@@ -52,27 +53,27 @@ async function applyLegsToOrderbookPositions(chainMarketId, legs, contractLower)
       continue;
     }
 
-    await OrderbookPosition.findOneAndUpdate(
-      { chainMarketId, walletAddress: addr, positionKey: leg.positionKey, contractAddress: c },
-      {
-        $inc: { shares: sh, totalInvested: inv },
-        $set: {
-          user: link.user,
-          contractAddress: c,
-          updatedAt: new Date(),
-          ...(refs.match ? { match: refs.match } : {}),
-          ...(refs.poll ? { poll: refs.poll } : {}),
-        },
-      },
-      { upsert: true }
-    );
+    await applyLegToOrderbookPosition({
+      chainMarketId,
+      walletAddress: addr,
+      positionKey: leg.positionKey,
+      contractLower: c,
+      userId: link.user,
+      matchId: refs.match,
+      pollId: refs.poll,
+      sharesDelta: sh,
+      investedDelta: inv,
+    });
   }
 
   await OrderbookPosition.deleteMany({
     chainMarketId,
-    contractAddress: c,
     shares: { $lte: 1e-9 },
-    totalInvested: { $lte: 1e-9 },
+    $or: [
+      { contractAddress: c },
+      { contractAddress: null },
+      { contractAddress: { $exists: false } },
+    ],
   });
 }
 

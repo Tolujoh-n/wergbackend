@@ -13,6 +13,7 @@ function resolveArtifactPath() {
 
   const candidates = [
     path.join(__dirname, '..', 'abi', 'WeRgame.json'),
+    path.join(__dirname, '..', '..', 'smart-contracts', 'build', 'contracts', 'WeRgame.json'),
     path.join(__dirname, '..', '..', 'smart-contract', 'build', 'contracts', 'WeRgame.json'),
     path.join(__dirname, '..', '..', 'frontend', 'src', 'abi', 'WeRgame.json'),
   ];

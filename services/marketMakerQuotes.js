@@ -254,7 +254,8 @@ async function absorbUserCrossingAndPartialOrders({
     if (remaining <= 1e-9) continue;
 
     const side = o.side;
-    if (isOptionSidePaused(ob, o.optionKey, side)) continue;
+    if ((ob.marketPaused || ob.riskPausedMarket) && o.direction === 'buy') continue;
+    if (isOptionSidePaused(ob, o.optionKey, side) && o.direction === 'buy') continue;
 
     const bookPrices = await bookPricesFor(o.optionKey, side);
     const crossing = isCrossingOrder(o, bookPrices);
@@ -305,18 +306,18 @@ async function ensureMinBookDepth({
   optionKey,
   side,
   mmWalletLower,
-  riskPaused,
+  pauseNewBuys,
   placeMmOrder,
   basePayload,
   spreadMult,
   quoteMult,
 }) {
-  if (riskPaused) return 0;
-
   const book = await getBook(chainMarketId, optionKey, side);
   const bidCount = book.bids?.length || 0;
   const askCount = book.asks?.length || 0;
-  if (bidCount >= LEVELS && askCount >= LEVELS) return 0;
+  const needBids = bidCount < LEVELS;
+  const needAsks = !pauseNewBuys && askCount < LEVELS;
+  if (!needBids && !needAsks) return 0;
 
   const spreadBps = (ob.spreadBps ?? 80) * spreadMult;
   const mid = midForOutcome(doc, optionKey, side);
@@ -350,7 +351,7 @@ async function ensureMinBookDepth({
     }
   }
 
-  for (let i = askCount; i < LEVELS; i++) {
+  for (let i = askCount; i < LEVELS && !pauseNewBuys; i++) {
     const askPx = asks[Math.min(i, LEVELS - 1)];
     const hasSell = await hasOpenMmQuoteAt({
       chainMarketId,
@@ -572,9 +573,7 @@ async function ensureQuotesForDoc(doc, kind) {
   const { patch, yesExposure, noExposure } = await refreshOrderbookRiskState(doc, kind, actor);
   doc = (await Model.findById(doc._id)) || doc;
   const ob = doc.orderbook || {};
-  if (patch?.riskPausedMarket || ob.riskPausedMarket) {
-    return { skipped: true, reason: 'Treasury risk paused entire market (allocation or max loss)' };
-  }
+  const marketPausedForBuys = !!(patch?.riskPausedMarket || ob.riskPausedMarket || ob.marketPaused);
 
   const riskPausedYes = !!(ob.pauseSideYes || ob.riskPausedYes);
   const riskPausedNo = !!(ob.pauseSideNo || ob.riskPausedNo);
@@ -639,7 +638,8 @@ async function ensureQuotesForDoc(doc, kind) {
 
   for (const optionKey of optionKeys) {
     for (const side of ['YES', 'NO']) {
-      if (isOptionSidePaused(ob, optionKey, side)) continue;
+      const sidePaused = isOptionSidePaused(ob, optionKey, side);
+      const pauseNewBuys = marketPausedForBuys || sidePaused;
 
       const widen = side === 'YES' ? yesWiden : noWiden;
       const spreadMult = widen ? 2.5 : 1;
@@ -673,26 +673,28 @@ async function ensureQuotesForDoc(doc, kind) {
         }
       }
 
-      for (let i = 0; i < LEVELS; i++) {
-        const askPx = asks[i];
-        const hasSell = await hasOpenMmQuoteAt({
-          chainMarketId,
-          optionKey,
-          side,
-          direction: 'sell',
-          limitPrice: askPx,
-          mmWalletLower,
-        });
-        if (!hasSell) {
-          await placeMmOrder({
-            ...basePayload,
+      if (!pauseNewBuys) {
+        for (let i = 0; i < LEVELS; i++) {
+          const askPx = asks[i];
+          const hasSell = await hasOpenMmQuoteAt({
+            chainMarketId,
             optionKey,
             side,
             direction: 'sell',
-            orderKind: 'limit',
             limitPrice: askPx,
-            size: q,
+            mmWalletLower,
           });
+          if (!hasSell) {
+            await placeMmOrder({
+              ...basePayload,
+              optionKey,
+              side,
+              direction: 'sell',
+              orderKind: 'limit',
+              limitPrice: askPx,
+              size: q,
+            });
+          }
         }
       }
 
@@ -703,7 +705,7 @@ async function ensureQuotesForDoc(doc, kind) {
         optionKey,
         side,
         mmWalletLower,
-        riskPaused: false,
+        pauseNewBuys,
         placeMmOrder,
         basePayload,
         spreadMult,
