@@ -3,8 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WalletLink = require('../models/WalletLink');
 const { auth } = require('../middleware/auth');
-const { getSendgridConfigured, getSendgridFromEmail } = require('../utils/sendgrid');
-const { generateNumericCode, hashResetCode, buildPasswordResetEmail } = require('../utils/passwordReset');
+const { sendPasswordResetCode, verifyPasswordResetCode, isPasswordResetVerified } = require('../services/passwordResetService');
 const {
   sendVerificationCode,
   verifyPhoneCode,
@@ -188,7 +187,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Request password reset code (email)
+// Request password reset code (email via Twilio Verify)
 router.post('/password-reset/request', async (req, res) => {
   try {
     const email = (req.body.email || '').trim();
@@ -197,36 +196,24 @@ router.post('/password-reset/request', async (req, res) => {
     }
 
     const user = await findUserByEmailCaseInsensitive(email);
-    if (user && user.email) {
-      const code = generateNumericCode();
-      const minutesValid = parseInt(process.env.PASSWORD_RESET_CODE_TTL_MINUTES || '10', 10);
-
-      user.passwordReset = {
-        codeHash: hashResetCode(code),
-        expiresAt: new Date(Date.now() + minutesValid * 60 * 1000),
-        sentAt: new Date(),
-        attempts: 0,
-      };
-      await user.save();
-
-      const sg = getSendgridConfigured();
-      const from = getSendgridFromEmail();
-      const appName = process.env.APP_NAME || 'WeRgame';
-      const emailBody = buildPasswordResetEmail({ appName, code, minutesValid });
-
-      await sg.send({
-        to: user.email,
-        from,
-        subject: emailBody.subject,
-        text: emailBody.text,
-        html: emailBody.html,
-      });
+    let result = { sent: false };
+    if (user) {
+      result = await sendPasswordResetCode(user);
     }
 
-    // Always return success to avoid account enumeration
-    return res.json({ message: 'If that email exists, we sent a verification code.' });
+    const body = {
+      message: 'If that email is registered with a password, we sent a verification code to your inbox.',
+    };
+    if (result.sent && result.emailMasked) {
+      body.emailMasked = result.emailMasked;
+    }
+
+    return res.json(body);
   } catch (error) {
-    return res.status(500).json({ message: 'Unable to send reset email. Please try again later.' });
+    const code = error.statusCode || 500;
+    const body = { message: error.message || 'Unable to send reset email. Please try again later.' };
+    if (error.retryAfterSeconds != null) body.retryAfterSeconds = error.retryAfterSeconds;
+    return res.status(code).json(body);
   }
 });
 
@@ -240,23 +227,12 @@ router.post('/password-reset/verify', async (req, res) => {
     }
 
     const user = await findUserByEmailCaseInsensitive(email);
-    if (!user || !user.passwordReset?.codeHash || !user.passwordReset?.expiresAt) {
+    if (!user || !user.passwordReset?.sentAt) {
       return res.status(400).json({ message: 'Invalid or expired code' });
     }
 
-    if (user.passwordReset.expiresAt.getTime() < Date.now()) {
-      return res.status(400).json({ message: 'Invalid or expired code' });
-    }
-
-    const maxAttempts = parseInt(process.env.PASSWORD_RESET_MAX_ATTEMPTS || '5', 10);
-    if ((user.passwordReset.attempts || 0) >= maxAttempts) {
-      return res.status(400).json({ message: 'Invalid or expired code' });
-    }
-
-    const ok = user.passwordReset.codeHash === hashResetCode(code);
+    const ok = await verifyPasswordResetCode(user, code);
     if (!ok) {
-      user.passwordReset.attempts = (user.passwordReset.attempts || 0) + 1;
-      await user.save();
       return res.status(400).json({ message: 'Invalid or expired code' });
     }
 
@@ -282,28 +258,19 @@ router.post('/password-reset/confirm', async (req, res) => {
     }
 
     const user = await findUserByEmailCaseInsensitive(email);
-    if (!user || !user.passwordReset?.codeHash || !user.passwordReset?.expiresAt) {
-      return res.status(400).json({ message: 'Invalid or expired code' });
-    }
-
-    if (user.passwordReset.expiresAt.getTime() < Date.now()) {
-      return res.status(400).json({ message: 'Invalid or expired code' });
-    }
-
-    const maxAttempts = parseInt(process.env.PASSWORD_RESET_MAX_ATTEMPTS || '5', 10);
-    if ((user.passwordReset.attempts || 0) >= maxAttempts) {
-      return res.status(400).json({ message: 'Invalid or expired code' });
-    }
-
-    const ok = user.passwordReset.codeHash === hashResetCode(code);
-    if (!ok) {
-      user.passwordReset.attempts = (user.passwordReset.attempts || 0) + 1;
-      await user.save();
-      return res.status(400).json({ message: 'Invalid or expired code' });
+    if (!user || !isPasswordResetVerified(user)) {
+      return res.status(400).json({ message: 'Invalid or expired code. Verify your code again.' });
     }
 
     user.password = newPassword;
-    user.passwordReset = { codeHash: null, expiresAt: null, sentAt: null, attempts: 0 };
+    user.passwordReset = {
+      provider: null,
+      codeHash: null,
+      verifiedAt: null,
+      expiresAt: null,
+      sentAt: null,
+      attempts: 0,
+    };
     await user.save();
 
     return res.json({ message: 'Password updated successfully' });

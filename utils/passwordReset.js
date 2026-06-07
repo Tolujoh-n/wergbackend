@@ -17,34 +17,26 @@ function hashResetCode(code) {
   return crypto.createHash('sha256').update(`${code}:${secret}`).digest('hex');
 }
 
-function buildPasswordResetEmail({ appName, code, minutesValid }) {
+function buildPasswordResetSmsBody({ appName, code, minutesValid }) {
   const product = appName || 'WeRgame';
   const validity = minutesValid || 10;
-  return {
-    subject: `${product} password reset code`,
-    text: [
-      `Your ${product} password reset code is: ${code}`,
-      '',
-      `This code expires in ${validity} minutes.`,
-      'If you did not request a password reset, you can ignore this email.',
-    ].join('\n'),
-    html: `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.5; color: #111827;">
-        <h2 style="margin: 0 0 12px;">Reset your password</h2>
-        <p style="margin: 0 0 12px;">Use the verification code below to reset your password for <strong>${product}</strong>:</p>
-        <div style="display: inline-block; padding: 12px 16px; border-radius: 10px; background: #eff6ff; border: 1px solid #bfdbfe; margin: 8px 0 16px;">
-          <div style="font-size: 22px; letter-spacing: 4px; font-weight: 700; color: #1d4ed8;">${code}</div>
-        </div>
-        <p style="margin: 0 0 12px;">This code expires in <strong>${validity} minutes</strong>.</p>
-        <p style="margin: 0; color: #6b7280;">If you didn’t request this, you can safely ignore this email.</p>
-      </div>
-    `,
-  };
+  return `${product}: Your password reset code is ${code}. It expires in ${validity} minutes. Do not share this code.`;
+}
+
+function maskEmail(email) {
+  const s = String(email || '').trim();
+  const at = s.indexOf('@');
+  if (at < 1) return '•••';
+  const local = s.slice(0, at);
+  const domain = s.slice(at);
+  if (local.length <= 2) return `${local[0] || ''}•${domain}`;
+  return `${local[0]}•••${local.slice(-1)}${domain}`;
 }
 
 module.exports = {
   generateNumericCode,
   hashResetCode,
-  buildPasswordResetEmail,
+  buildPasswordResetSmsBody,
+  maskEmail,
 };
 

@@ -72,7 +72,9 @@ const userSchema = new mongoose.Schema({
   },
 
   passwordReset: {
+    provider: { type: String },
     codeHash: { type: String },
+    verifiedAt: { type: Date },
     expiresAt: { type: Date },
     sentAt: { type: Date },
     attempts: { type: Number, default: 0 },
