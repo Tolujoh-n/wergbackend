@@ -1,6 +1,6 @@
 const express = require('express');
 const { ethers } = require('ethers');
-const { getContractAddress, getChainId, getJsonRpcProvider } = require('../utils/chainConfig');
+const { getContractAddress, getChainId, getJsonRpcProvider, getUsdcAddress } = require('../utils/chainConfig');
 const { getClaimSignerAddress } = require('../utils/claimAuth');
 const { getWeRgameAbiSync } = require('../utils/wergameContractAbi');
 
@@ -18,7 +18,7 @@ function checksumOrNull(raw) {
 /** Public chain + deployment addresses (frontend must match backend after redeploy). */
 router.get('/blockchain', (req, res) => {
   const contractAddress = getContractAddress();
-  const usdcAddress = checksumOrNull(process.env.USDC_ADDRESS || process.env.REACT_APP_USDC_ADDRESS);
+  const usdcAddress = getUsdcAddress();
   res.json({
     contractAddress,
     usdcAddress,
@@ -34,7 +34,7 @@ router.get('/blockchain/usdc-state', async (req, res) => {
     const wallet = checksumOrNull(req.query.wallet);
     if (!wallet) return res.status(400).json({ ok: false, message: 'wallet query required' });
     const contractAddress = getContractAddress();
-    const usdcAddress = checksumOrNull(process.env.USDC_ADDRESS || process.env.REACT_APP_USDC_ADDRESS);
+    const usdcAddress = getUsdcAddress();
     if (!contractAddress || !usdcAddress) {
       return res.status(503).json({ ok: false, message: 'CONTRACT_ADDRESS or USDC_ADDRESS not configured' });
     }
@@ -68,11 +68,11 @@ router.get('/blockchain/usdc-state', async (req, res) => {
   }
 });
 
-/** Verify WeRgame + MockUSDC exist on configured RPC (debug after redeploy). */
+/** Verify WeRgame + USDC exist on configured RPC (debug after redeploy). */
 router.get('/blockchain/verify', async (req, res) => {
   try {
     const contractAddress = getContractAddress();
-    const usdcAddress = checksumOrNull(process.env.USDC_ADDRESS || process.env.REACT_APP_USDC_ADDRESS);
+    const usdcAddress = getUsdcAddress();
     if (!contractAddress || !usdcAddress) {
       return res.status(503).json({ ok: false, message: 'CONTRACT_ADDRESS or USDC_ADDRESS not configured' });
     }

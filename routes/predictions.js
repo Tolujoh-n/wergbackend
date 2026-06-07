@@ -1306,7 +1306,8 @@ async function handleClaimAuthorization(req, res) {
 
     const contractAddressRaw =
       process.env.CONTRACT_ADDRESS || process.env.REACT_APP_CONTRACT_ADDRESS;
-    const chainId = parseInt(process.env.CHAIN_ID || '84532', 10);
+    const { getChainId } = require('../utils/chainConfig');
+    const chainId = getChainId();
     if (!contractAddressRaw) {
       return res.status(500).json({
         message: 'Set CONTRACT_ADDRESS (or REACT_APP_CONTRACT_ADDRESS) on the server',

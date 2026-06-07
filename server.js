@@ -72,7 +72,7 @@ app.get('/api/config/claim', (req, res) => {
   }
   res.json({
     contractAddress,
-    chainId: parseInt(process.env.CHAIN_ID || '84532', 10),
+    chainId: require('./utils/chainConfig').getChainId(),
     claimSignerAddress: getClaimSignerAddress(),
   });
 });
