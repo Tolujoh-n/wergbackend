@@ -16,26 +16,13 @@ const {
 } = require('./services/settlementOutbox');
 const { migrateOrderbookPositionLedger } = require('./utils/orderbookPositionLedger');
 const { processAllDueGoldenTicketGrants } = require('./services/goldenTicketDailyGrantService');
+const { corsOptions, applyCorsHeaders } = require('./utils/corsConfig');
 
 const app = express();
 
-// Middleware
-app.use(cors({
-  origin: [
-    'https://wergtest-enn.vercel.app',
-    'http://localhost:3000',
-    'https://wergame.io',
-    'http://wergame.io',
-    'https://www.wergame.io',
-    'http://www.wergame.io',
-    'https://app.wergame.io',
-    'http://app.wergame.io',
-    'https://www.app.wergame.io',
-    'http://www.app.wergame.io',
-    'http://localhost:8080'
-  ],
-  credentials: true
-}));
+app.use(applyCorsHeaders);
+app.use(cors(corsOptions()));
+app.use(applyCorsHeaders);
 app.use(express.json());
 
 // Routes
