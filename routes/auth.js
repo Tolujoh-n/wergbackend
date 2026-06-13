@@ -187,7 +187,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Request password reset code (email via Twilio Verify)
+// Request password reset code (email via SendGrid)
 router.post('/password-reset/request', async (req, res) => {
   try {
     const email = (req.body.email || '').trim();

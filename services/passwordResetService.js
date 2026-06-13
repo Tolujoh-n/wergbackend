@@ -3,11 +3,7 @@ const {
   hashResetCode,
   maskEmail,
 } = require('../utils/passwordReset');
-const {
-  isTwilioVerifyEmailConfigured,
-  sendEmailVerificationCode,
-  checkEmailVerificationCode,
-} = require('../utils/twilioVerifyEmail');
+const { isSendgridConfigured, sendPasswordResetEmail } = require('../utils/sendgrid');
 
 const TTL_MINUTES = () => parseInt(process.env.PASSWORD_RESET_CODE_TTL_MINUTES || '10', 10);
 const RESEND_SECONDS = () =>
@@ -28,10 +24,10 @@ function isDevPasswordReset() {
 }
 
 function assertCanSendPasswordResetEmail() {
-  if (isTwilioVerifyEmailConfigured()) return;
+  if (isSendgridConfigured()) return;
   if (isDevPasswordReset()) return;
   const err = new Error(
-    'Password reset email is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_VERIFY_SERVICE_SID (Verify service with Email enabled in Twilio Console). For local dev, set PASSWORD_RESET_DEV_LOG=true.'
+    'Password reset email is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL on the server. For local dev, set PASSWORD_RESET_DEV_LOG=true.'
   );
   err.statusCode = 503;
   throw err;
@@ -50,9 +46,20 @@ function enforceResendCooldown(user) {
   }
 }
 
+function clearPasswordReset(user) {
+  user.passwordReset = {
+    provider: null,
+    codeHash: null,
+    verifiedAt: null,
+    expiresAt: null,
+    sentAt: null,
+    attempts: 0,
+  };
+}
+
 /**
  * Email password reset for accounts that signed up with email + password.
- * Uses Twilio Verify (email channel) in production; logs code in dev when configured.
+ * Sends a 6-digit code via SendGrid.
  */
 async function sendPasswordResetCode(user) {
   if (!user?.email || !user?.password) {
@@ -65,29 +72,10 @@ async function sendPasswordResetCode(user) {
   const email = String(user.email).trim().toLowerCase();
   const minutesValid = TTL_MINUTES();
   const sentAt = new Date();
-
-  if (isTwilioVerifyEmailConfigured()) {
-    await sendEmailVerificationCode(email);
-    user.passwordReset = {
-      provider: 'twilio_verify',
-      codeHash: null,
-      verifiedAt: null,
-      expiresAt: null,
-      sentAt,
-      attempts: 0,
-    };
-    await user.save();
-    return {
-      sent: true,
-      emailMasked: maskEmail(email),
-      expiresInMinutes: minutesValid,
-      resendAfterSeconds: RESEND_SECONDS(),
-    };
-  }
-
   const code = generateNumericCode();
+
   user.passwordReset = {
-    provider: 'local',
+    provider: isSendgridConfigured() ? 'sendgrid' : 'local',
     codeHash: hashResetCode(code),
     verifiedAt: null,
     expiresAt: new Date(Date.now() + minutesValid * 60 * 1000),
@@ -95,14 +83,32 @@ async function sendPasswordResetCode(user) {
     attempts: 0,
   };
   await user.save();
-  console.log('[passwordReset] DEV — code for', email, ':', code);
+
+  try {
+    if (isSendgridConfigured()) {
+      await sendPasswordResetEmail({
+        to: email,
+        code,
+        minutesValid,
+        appName: process.env.APP_NAME,
+      });
+    } else {
+      console.log('[passwordReset] DEV — code for', email, ':', code);
+    }
+  } catch (e) {
+    clearPasswordReset(user);
+    await user.save();
+    const err = new Error('Unable to send reset email. Please try again later.');
+    err.statusCode = 502;
+    throw err;
+  }
 
   return {
     sent: true,
     emailMasked: maskEmail(email),
     expiresInMinutes: minutesValid,
     resendAfterSeconds: RESEND_SECONDS(),
-    dev: true,
+    dev: !isSendgridConfigured(),
   };
 }
 
@@ -120,19 +126,17 @@ async function verifyPasswordResetCode(user, codeRaw) {
     throw err;
   }
 
-  const email = String(user.email).trim().toLowerCase();
-  let ok = false;
-
-  if (pr.provider === 'twilio_verify') {
-    ok = await checkEmailVerificationCode(email, code);
-  } else if (pr.codeHash && pr.expiresAt) {
-    if (pr.expiresAt.getTime() < Date.now()) {
-      const err = new Error('Invalid or expired code');
-      err.statusCode = 400;
-      throw err;
-    }
-    ok = pr.codeHash === hashResetCode(code);
+  if (!pr.codeHash || !pr.expiresAt) {
+    return false;
   }
+
+  if (pr.expiresAt.getTime() < Date.now()) {
+    const err = new Error('Invalid or expired code');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const ok = pr.codeHash === hashResetCode(code);
 
   if (!ok) {
     user.passwordReset.attempts = (pr.attempts || 0) + 1;

@@ -13,6 +13,7 @@ const Settings = require('../models/Settings');
 const NewsletterSubscriber = require('../models/NewsletterSubscriber');
 const { uploadImage, deleteImage } = require('../utils/cloudinary');
 const { scheduleMarketMakerSeed } = require('../services/marketMakerQuotes');
+const { normalizeStartingPricesRows } = require('../utils/targetOdds');
 const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
 const { resolveUserByIdentifier } = require('../utils/resolveUserByIdentifier');
 const { awardGoldenTickets } = require('../services/ticketService');
@@ -476,7 +477,7 @@ router.post('/matches', async (req, res) => {
       minFreeTickets: Math.max(1, parseInt(minFreeTickets, 10) || 1),
       freePredictionEnabled: freePredictionEnabled !== false,
       drawEnabled: drawEnabled !== false,
-      startingPrices: Array.isArray(startingPrices) ? startingPrices : [],
+      startingPrices: normalizeStartingPricesRows(Array.isArray(startingPrices) ? startingPrices : []),
       isFeatured: isFeatured || false,
       isSponsored: isSponsored || false,
       sponsoredImages: Array.isArray(sponsoredImages) ? sponsoredImages.filter(img => img && img.trim() !== '') : [],
@@ -856,7 +857,7 @@ router.post('/polls', async (req, res) => {
       ...(orderbookContractAddressLower() ? { contractAddress: orderbookContractAddressLower() } : {}),
       minFreeTickets: Math.max(1, parseInt(minFreeTickets, 10) || 1),
       freePredictionEnabled: freePredictionEnabled !== false,
-      startingPrices: Array.isArray(startingPrices) ? startingPrices : [],
+      startingPrices: normalizeStartingPricesRows(Array.isArray(startingPrices) ? startingPrices : []),
       isFeatured: isFeatured || false,
       isSponsored: isSponsored || false,
       sponsoredImages: Array.isArray(sponsoredImages) ? sponsoredImages.filter(img => img && img.trim() !== '') : [],

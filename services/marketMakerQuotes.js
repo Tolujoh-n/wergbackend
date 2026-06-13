@@ -443,6 +443,20 @@ async function forceRequoteMarketMm(doc, kind) {
   return ensureQuotesForDoc(doc, kind);
 }
 
+/** Non-blocking requote after admin updates target odds — keeps PUT responses fast. */
+function scheduleForceRequoteMarketMm({ kind, id }) {
+  setImmediate(async () => {
+    try {
+      const doc = kind === 'match' ? await Match.findById(id) : await Poll.findById(id);
+      if (!doc) return;
+      const r = await forceRequoteMarketMm(doc, kind);
+      console.log('[marketMakerQuotes] forceRequote', kind, String(id), r?.skipped ? r : 'ok');
+    } catch (e) {
+      console.error('[marketMakerQuotes] forceRequote failed', kind, String(id), e.message || e);
+    }
+  });
+}
+
 async function cancelMmQuotesForChainSide(chainMarketId, mmWalletLower, side) {
   await Order.updateMany(
     withOrderbookContract({
@@ -857,5 +871,6 @@ module.exports = {
   syncOrderbookRiskToDb,
   refreshOrderbookRiskState,
   forceRequoteMarketMm,
+  scheduleForceRequoteMarketMm,
   LEVELS,
 };

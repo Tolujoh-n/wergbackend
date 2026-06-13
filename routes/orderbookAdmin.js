@@ -15,7 +15,8 @@ const {
   pendingVaultDebitForWallet,
   openBuyOrderReservedUsd,
 } = require('../services/orderbookService');
-const { runMatchMmTick, runPollMmTick, scheduleMarketMakerSeed, forceRequoteMarketMm } = require('../services/marketMakerQuotes');
+const { runMatchMmTick, runPollMmTick, scheduleMarketMakerSeed, scheduleForceRequoteMarketMm } = require('../services/marketMakerQuotes');
+const { normalizeStartingPricesRows } = require('../utils/targetOdds');
 const { withOrderbookContract } = require('../utils/orderbookContractScope');
 
 const router = express.Router();
@@ -44,21 +45,12 @@ function sanitizeAdminOrderbookBody(body) {
 
 function normalizeStartingPrices(rows) {
   if (!Array.isArray(rows)) return null;
-  const out = rows
-    .map((row) => {
-      const optionKey = String(row?.optionKey || '').trim();
-      const yesPrice = Math.max(0.01, Math.min(0.99, Number(row?.yesPrice) || 0.5));
-      const noPrice = Math.max(0.01, Math.min(0.99, Number(row?.noPrice) || 0.5));
-      if (!optionKey) return null;
-      if (yesPrice + noPrice > 1.0001) {
-        const err = new Error(`YES + NO prices for "${optionKey}" must sum to at most 1`);
-        err.statusCode = 400;
-        throw err;
-      }
-      return { optionKey, yesPrice, noPrice };
-    })
-    .filter(Boolean);
-  return out;
+  try {
+    return normalizeStartingPricesRows(rows);
+  } catch (e) {
+    if (e.statusCode) throw e;
+    return null;
+  }
 }
 
 function startingPricesChanged(before, after) {
@@ -83,7 +75,7 @@ async function applyAdminMarketUpdate(doc, kind, body) {
 
   const pricesChanged = startingPrices ? startingPricesChanged(prevPrices, startingPrices) : false;
   if (pricesChanged) {
-    await forceRequoteMarketMm(doc, kind);
+    scheduleForceRequoteMarketMm({ kind, id: doc._id });
   } else {
     scheduleMarketMakerSeed({ kind, id: doc._id });
   }
