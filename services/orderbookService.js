@@ -453,6 +453,134 @@ async function estimateImmediatelyMatchableSellShares(chainMarketId, optionKey, 
   return parseFloat(marketable.toFixed(6));
 }
 
+async function continueOrderMatchSettlement(orderId, item, kind, fees) {
+  const matchId = kind === 'match' ? item._id : undefined;
+  const pollId = kind === 'poll' ? item._id : undefined;
+  const contractLower = orderbookContractAddressLower();
+  let ledgerApply = null;
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const fresh = await Order.findById(orderId).session(session);
+      if (!fresh) return;
+      if (!['open', 'partially_filled', 'pending'].includes(fresh.status)) return;
+      if (Number(fresh.sizeRemaining) <= 1e-9) return;
+      const { fills, touched } = await runMatch(fresh, fees, session);
+      if (fills.length === 0) return;
+      const { legs, feeToClaimPool, feeToJackpotPool, feePlatformUsd, feeJackpotUsd } = buildSettlementLegs(
+        fresh,
+        fills
+      );
+      for (const m of touched) await m.save({ session });
+      await fresh.save({ session });
+      if (feeJackpotUsd > 1e-12 || feePlatformUsd > 1e-12) {
+        if (matchId) {
+          await Match.updateOne(
+            { _id: matchId },
+            { $inc: { freeJackpotPool: feeJackpotUsd, platformFees: feePlatformUsd } }
+          ).session(session);
+        } else if (pollId) {
+          await Poll.updateOne(
+            { _id: pollId },
+            { $inc: { freeJackpotPool: feeJackpotUsd, platformFees: feePlatformUsd } }
+          ).session(session);
+        }
+      }
+      const [outDoc] = await SettlementOutbox.create(
+        [
+          {
+            contractAddress: contractLower,
+            chainMarketId: item.marketId,
+            legs,
+            feeToClaimPool,
+            feeToJackpotPool,
+            orderIds: [fresh._id, ...touched.map((t) => t._id)],
+            status: 'pending',
+          },
+        ],
+        { session }
+      );
+      ledgerApply = { chainMarketId: item.marketId, legs, contractLower, outId: outDoc._id };
+    });
+  } catch (e) {
+    console.warn('continueOrderMatchSettlement', String(orderId), e.message || e);
+  } finally {
+    await session.endSession();
+  }
+  if (ledgerApply) {
+    try {
+      await applyLegsToOrderbookPositions(ledgerApply.chainMarketId, ledgerApply.legs, ledgerApply.contractLower);
+      await SettlementOutbox.updateOne(
+        { _id: ledgerApply.outId },
+        { $set: { positionsLedgerApplied: true, updatedAt: new Date() } }
+      );
+    } catch (e) {
+      console.error('continueOrderMatchSettlement ledger', e.message || e);
+    }
+  }
+}
+
+async function tryCompleteUserOrderFill(orderId, item, kind, fees) {
+  const {
+    ensureQuotesForDoc,
+    absorbUserCrossingAndPartialOrders,
+    placeMmAbsorbLiquidityForOrder,
+    getMarketMakerActor,
+    syncOrderbookRiskToDb,
+  } = require('./marketMakerQuotes');
+  const matchId = kind === 'match' ? item._id : undefined;
+  const pollId = kind === 'poll' ? item._id : undefined;
+  const isUserMarket = async () => {
+    const o = await Order.findById(orderId).lean();
+    return String(o?.orderKind || '').toLowerCase() === 'market';
+  };
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const before = await Order.findById(orderId).lean();
+    if (!before || Number(before.sizeRemaining) <= 1e-9) break;
+    if (!['open', 'partially_filled', 'pending'].includes(String(before.status))) break;
+
+    await ensureQuotesForDoc(item, kind);
+    await continueOrderMatchSettlement(orderId, item, kind, fees);
+
+    const mid = await Order.findById(orderId).lean();
+    if (!mid || Number(mid.sizeRemaining) <= 1e-9) break;
+
+    const actor = await getMarketMakerActor();
+    if (actor) {
+      const risk = await syncOrderbookRiskToDb(item, kind);
+      if (risk?.patch) {
+        item.orderbook = { ...(item.orderbook || {}), ...risk.patch };
+      }
+      const ob = item.orderbook || {};
+      await absorbUserCrossingAndPartialOrders({
+        doc: item,
+        kind,
+        actor,
+        ob,
+        riskPausedYes: !!(ob.pauseSideYes || ob.riskPausedYes),
+        riskPausedNo: !!(ob.pauseSideNo || ob.riskPausedNo),
+        matchId,
+        pollId,
+      });
+      await placeMmAbsorbLiquidityForOrder({
+        order: mid,
+        actor,
+        ob,
+        matchId,
+        pollId,
+      });
+      await continueOrderMatchSettlement(orderId, item, kind, fees);
+    }
+
+    const after = await Order.findById(orderId).lean();
+    if (!after || Number(after.sizeRemaining) <= 1e-9) break;
+    const progressed = Number(after.sizeRemaining) < Number(before.sizeRemaining) - 1e-9;
+    const marketOrder = await isUserMarket();
+    if (!progressed && !marketOrder && attempt >= 1) break;
+  }
+}
+
 function buildSettlementLegs(incomingDoc, fills) {
   const legsMap = new Map();
   const pk = positionKey(incomingDoc.optionKey, incomingDoc.side);
@@ -557,6 +685,14 @@ async function placeOrder(payload) {
 
   let px;
   if (orderKind === 'market') {
+    if (!isMarketMaker) {
+      try {
+        const { ensureQuotesForDoc } = require('./marketMakerQuotes');
+        await ensureQuotesForDoc(item, kind);
+      } catch (e) {
+        console.warn('orderbook mm pre-quote before market order:', e.message || e);
+      }
+    }
     const oppositeDir = direction === 'buy' ? 'sell' : 'buy';
     const sort = direction === 'buy' ? { limitPrice: 1 } : { limitPrice: -1 };
     const findBest = () =>
@@ -583,7 +719,11 @@ async function placeOrder(payload) {
     if (!best) {
       throw Object.assign(new Error('No liquidity to match market order'), { statusCode: 400 });
     }
-    const slip = slippageBps / 10000;
+    const obSlipBps = Math.max(
+      Number(slippageBps) || 100,
+      Number(item.orderbook?.maxSlippageBps) || 300
+    );
+    const slip = obSlipBps / 10000;
     if (direction === 'buy') {
       px = Math.min(0.99, best.limitPrice * (1 + slip));
     } else {
@@ -801,6 +941,25 @@ async function placeOrder(payload) {
     await Order.updateOne({ _id: createdId }, { $set: { status: nextStatus } });
     out = await Order.findById(createdId).lean();
   }
+
+  if (
+    !isMarketMaker &&
+    (orderKind === 'market' || String(out?.status || '').toLowerCase() === 'partially_filled')
+  ) {
+    await tryCompleteUserOrderFill(createdId, item, kind, fees);
+    out = await Order.findById(createdId).lean();
+    if (out && out.status === 'pending') {
+      const nextStatus =
+        Number(out.sizeRemaining) <= 1e-9
+          ? 'filled'
+          : Number(out.sizeFilled) > 1e-9
+            ? 'partially_filled'
+            : 'open';
+      await Order.updateOne({ _id: createdId }, { $set: { status: nextStatus } });
+      out = await Order.findById(createdId).lean();
+    }
+  }
+
   return out;
 }
 

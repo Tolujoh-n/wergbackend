@@ -99,11 +99,39 @@ function clearAdminCacheForWallet(walletAddress) {
   if (w) adminCache.delete(w);
 }
 
+/** Single pass: on-chain admin wallets + access flag (avoids duplicate RPC per wallet). */
+async function resolveAdminAccessForUser(user) {
+  if (!user) {
+    return { canAccessAdmin: false, isContractAdmin: false, contractAdminWallets: [] };
+  }
+  if (dbRoleHasAdminAccess(user.role)) {
+    return { canAccessAdmin: true, isContractAdmin: false, contractAdminWallets: [] };
+  }
+
+  const contractAddr = getContractAddress();
+  if (!contractAddr) {
+    return { canAccessAdmin: false, isContractAdmin: false, contractAdminWallets: [] };
+  }
+
+  const wallets = await getWalletAddressesForUser(user);
+  const contractAdminWallets = [];
+  for (const w of wallets) {
+    if (await isWalletOnChainAdmin(w)) contractAdminWallets.push(w);
+  }
+  const canAccessAdmin = contractAdminWallets.length > 0;
+  return {
+    canAccessAdmin,
+    isContractAdmin: canAccessAdmin,
+    contractAdminWallets,
+  };
+}
+
 module.exports = {
   isWalletOnChainAdmin,
   getWalletAddressesForUser,
   userHasAdminAccess,
   contractAdminWalletsForUser,
+  resolveAdminAccessForUser,
   clearAdminCacheForWallet,
   dbRoleHasAdminAccess,
 };

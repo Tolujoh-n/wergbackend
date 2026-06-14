@@ -41,26 +41,46 @@ async function getUserWallets(userId) {
   return (links || []).map((l) => l.walletAddress).filter(Boolean);
 }
 
-async function toUserResponse(user) {
+async function toUserResponse(user, options = {}) {
   if (!user) return null;
-  const wallets = await getUserWallets(user._id);
+  const fast = options.fast === true;
   const { getTicketBalances } = require('../services/ticketService');
-  const {
-    userHasAdminAccess,
-    contractAdminWalletsForUser,
-    dbRoleHasAdminAccess,
-  } = require('../services/contractAdminAccess');
-  let ticketInfo = {};
-  try {
-    ticketInfo = await getTicketBalances(user._id);
-  } catch {
-    ticketInfo = { normalTickets: user.tickets || 0, goldenTickets: user.goldenTickets || 0 };
+  const { resolveAdminAccessForUser, dbRoleHasAdminAccess } = require('../services/contractAdminAccess');
+
+  if (fast) {
+    const wallets = await getUserWallets(user._id);
+    const normalTickets = Math.max(0, user.tickets ?? 1);
+    const goldenTickets = Math.max(0, user.goldenTickets ?? 0);
+    const canAccessAdmin = dbRoleHasAdminAccess(user.role);
+    return {
+      _id: user._id,
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      walletAddress: user.walletAddress,
+      wallets,
+      canAccessAdmin,
+      isContractAdmin: false,
+      contractAdminWallets: [],
+      points: user.points || 0,
+      tickets: normalTickets,
+      goldenTickets,
+      totalTickets: normalTickets + goldenTickets,
+      ...phoneStatusForUser(user),
+    };
   }
-  const canAccessAdmin = await userHasAdminAccess(user);
-  const contractAdminWallets = dbRoleHasAdminAccess(user.role)
-    ? []
-    : await contractAdminWalletsForUser(user._id);
-  const isContractAdmin = canAccessAdmin && !dbRoleHasAdminAccess(user.role);
+
+  const [wallets, ticketInfo, adminAccess] = await Promise.all([
+    getUserWallets(user._id),
+    getTicketBalances(user._id).catch(() => ({
+      normalTickets: user.tickets || 0,
+      goldenTickets: user.goldenTickets || 0,
+      totalSpendable: (user.tickets || 0) + (user.goldenTickets || 0),
+    })),
+    resolveAdminAccessForUser(user),
+  ]);
+
   return {
     _id: user._id,
     id: user._id,
@@ -69,9 +89,9 @@ async function toUserResponse(user) {
     role: user.role,
     walletAddress: user.walletAddress,
     wallets,
-    canAccessAdmin,
-    isContractAdmin,
-    contractAdminWallets,
+    canAccessAdmin: adminAccess.canAccessAdmin,
+    isContractAdmin: adminAccess.isContractAdmin,
+    contractAdminWallets: adminAccess.contractAdminWallets,
     points: user.points || 0,
     tickets: ticketInfo.normalTickets ?? user.tickets ?? 0,
     goldenTickets: ticketInfo.goldenTickets ?? user.goldenTickets ?? 0,
@@ -131,12 +151,14 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'Password must be at least 8 characters' });
     }
 
-    const emailExists = await User.findOne({ email: normalizedEmail });
+    const [emailExists, usernameExists] = await Promise.all([
+      User.findOne({ email: normalizedEmail }),
+      User.findOne({ username: normalizedUsername }),
+    ]);
     if (emailExists) {
       return res.status(400).json({ message: 'This email is already registered. Please login instead.' });
     }
 
-    const usernameExists = await User.findOne({ username: normalizedUsername });
     if (usernameExists) {
       return res.status(400).json({ message: 'This username is already taken. Please choose another one.' });
     }
@@ -145,7 +167,7 @@ router.post('/signup', async (req, res) => {
     await user.save();
 
     const token = generateToken(user._id);
-    res.json({ token, user: await toUserResponse(user) });
+    res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -161,10 +183,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email/username and password are required' });
     }
 
-    const userByEmail = await findUserByEmailCaseInsensitive(identifier);
-    const user =
-      userByEmail ||
-      (await User.findOne({ username: identifier }));
+    const trimmed = identifier.trim();
+    let user = null;
+    if (trimmed.includes('@')) {
+      user = await User.findOne({ email: trimmed.toLowerCase() });
+      if (!user) {
+        user = await findUserByEmailCaseInsensitive(trimmed);
+      }
+    } else {
+      user = await User.findOne({ username: trimmed });
+    }
 
     if (!user) {
       return res.status(404).json({ message: 'Account not found. Please check your email/username or sign up.' });
@@ -180,8 +208,8 @@ router.post('/login', async (req, res) => {
     }
 
     const token = generateToken(user._id);
-    await ensureLegacyWalletLink(user);
-    res.json({ token, user: await toUserResponse(user) });
+    ensureLegacyWalletLink(user).catch(() => {});
+    res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -306,7 +334,7 @@ router.post('/wallet-login', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const token = generateToken(user._id);
-    res.json({ token, user: await toUserResponse(user) });
+    res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -327,7 +355,7 @@ router.post('/wallet-signup', async (req, res) => {
       const existingUser = await User.findById(existingLink.user);
       if (existingUser) {
         const token = generateToken(existingUser._id);
-        return res.json({ token, user: await toUserResponse(existingUser) });
+        return res.json({ token, user: await toUserResponse(existingUser, { fast: true }) });
       }
     }
 
@@ -337,7 +365,7 @@ router.post('/wallet-signup', async (req, res) => {
     await WalletLink.create({ walletAddress, user: user._id });
 
     const token = generateToken(user._id);
-    res.json({ token, user: await toUserResponse(user) });
+    res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -448,8 +476,8 @@ router.post('/google', async (req, res) => {
     }
 
     const token = generateToken(user._id);
-    await ensureLegacyWalletLink(user);
-    res.json({ token, user: await toUserResponse(user) });
+    ensureLegacyWalletLink(user).catch(() => {});
+    res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

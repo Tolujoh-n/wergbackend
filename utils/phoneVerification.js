@@ -46,13 +46,26 @@ function toE164(countryDialCode, nationalNumber) {
 function maskPhone(e164) {
   const s = String(e164 || '');
   if (s.length < 8) return '••••';
-  return `${s.slice(0, 3)} ••• ••${s.slice(-2)}`;
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return `+${digits.slice(0, 3)} ••• ••${digits.slice(-2)}`;
+  }
+  return `${s.slice(0, 4)} ••• ••${s.slice(-2)}`;
 }
 
 function buildVerificationSmsBody({ appName, code, minutesValid }) {
-  const product = appName || 'WeRgame';
-  const validity = minutesValid || 10;
-  return `${product}: Your verification code is ${code}. It expires in ${validity} minutes. Do not share this code.`;
+  const product = String(appName || 'WeRgame').trim() || 'WeRgame';
+  const minutes = Math.max(1, parseInt(minutesValid, 10) || 10);
+  const custom = process.env.PHONE_VERIFY_SMS_TEMPLATE;
+  if (custom && String(custom).includes('{{code}}')) {
+    return String(custom)
+      .replace(/\{\{appName\}\}/g, product)
+      .replace(/\{\{code\}\}/g, String(code))
+      .replace(/\{\{minutes\}\}/g, String(minutes))
+      .slice(0, 160);
+  }
+  // Short body — long "verification code" templates are often blocked on NG routes.
+  return `${product}: ${code} (valid ${minutes} min)`;
 }
 
 module.exports = {

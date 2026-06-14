@@ -548,6 +548,7 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     
     // Get fees from settings
     const fees = await getFees();
+    let goldenTicketsAwarded = 0;
     
     if (action === 'add') {
       let verifiedAdd = null;
@@ -574,8 +575,8 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
       const netStakeAmount = stakeAmount - platformFeeAmount - jackpotFeeAmount;
 
       const ranges = await getGoldenTicketBoostRanges();
-      const goldenAward = goldenTicketsForBoostAmount(ranges, stakeAmount);
-      if (goldenAward > 0) await awardGoldenTickets(req.user._id, goldenAward);
+      goldenTicketsAwarded = goldenTicketsForBoostAmount(ranges, stakeAmount);
+      if (goldenTicketsAwarded > 0) await awardGoldenTickets(req.user._id, goldenTicketsAwarded);
 
       const addNet =
         verifiedAdd?.ok && Number.isFinite(verifiedAdd.netStakeUsdc)
@@ -625,8 +626,11 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     prediction.updatedAt = new Date();
     await prediction.save();
     await item.save();
-    
-    res.json(prediction);
+
+    res.json({
+      ...prediction.toObject(),
+      goldenTicketsAwarded,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

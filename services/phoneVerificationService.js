@@ -60,7 +60,7 @@ async function sendVerificationCode(userId, countryDialCode, nationalNumber) {
   const appName = process.env.APP_NAME || 'WeRgame';
   const smsBody = buildVerificationSmsBody({ appName, code, minutesValid });
 
-  await sendSms(e164, smsBody);
+  const smsResult = await sendSms(e164, smsBody);
 
   user.phone = e164;
   user.phoneVerified = false;
@@ -77,6 +77,8 @@ async function sendVerificationCode(userId, countryDialCode, nationalNumber) {
     phoneMasked: maskPhone(e164),
     expiresInMinutes: minutesValid,
     resendAfterSeconds: RESEND_SECONDS(),
+    smsSid: smsResult?.sid || null,
+    smsStatus: smsResult?.status || null,
   };
 }
 

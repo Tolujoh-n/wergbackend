@@ -69,6 +69,9 @@ const pollSchema = new mongoose.Schema({
       optionKey: { type: String },
       yesPrice: { type: Number, default: 0.5 },
       noPrice: { type: Number, default: 0.5 },
+      quoteVolumeUsdc: { type: Number, default: 200 },
+      yesQuoteVolumeUsdc: { type: Number },
+      noQuoteVolumeUsdc: { type: Number },
     },
   ],
   marketId: {

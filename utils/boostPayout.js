@@ -87,11 +87,14 @@ async function getBoostPoolStats({ matchId, pollId }) {
   }
 
   const boostPool = Number(item.boostPool) || 0;
+  const { getGoldenTicketBoostRanges } = require('../services/ticketService');
+  const goldenTicketBoostRanges = await getGoldenTicketBoostRanges();
   return {
     boostPool,
     stakesByOutcome,
     totalNetStakes,
     adminTopUp: Math.max(0, boostPool - totalNetStakes),
+    goldenTicketBoostRanges,
   };
 }
 

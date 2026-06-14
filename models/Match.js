@@ -65,6 +65,10 @@ const matchSchema = new mongoose.Schema({
       optionKey: { type: String },
       yesPrice: { type: Number, default: 0.5 },
       noPrice: { type: Number, default: 0.5 },
+      /** Max MM resting notional (USDC) per outcome — split YES/NO (default 100 each). */
+      quoteVolumeUsdc: { type: Number, default: 200 },
+      yesQuoteVolumeUsdc: { type: Number },
+      noQuoteVolumeUsdc: { type: Number },
     },
   ],
   boostPool: {

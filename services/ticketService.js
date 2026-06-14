@@ -222,7 +222,13 @@ function goldenTicketsForBoostAmount(ranges, stakeUsdc) {
   if (amt <= 0 || !ranges?.length) return 0;
   for (const r of ranges) {
     const min = Number(r.minUsdc) || 0;
-    const max = Number(r.maxUsdc) || Infinity;
+    const maxRaw = r.maxUsdc;
+    const max =
+      maxRaw == null || maxRaw === ''
+        ? Infinity
+        : Number.isFinite(Number(maxRaw))
+          ? Number(maxRaw)
+          : Infinity;
     const tickets = parseInt(r.tickets, 10) || 0;
     if (amt >= min && amt <= max) return tickets;
   }
