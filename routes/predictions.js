@@ -154,10 +154,18 @@ router.post('/free', auth, async (req, res) => {
     const existingPrediction = await Prediction.findOne(query);
     if (existingPrediction) {
       if (item.status === 'upcoming' || item.status === 'active') {
-        existingPrediction.outcome = outcomeToStore;
-        existingPrediction.updatedAt = new Date();
-        await existingPrediction.save();
-        return res.json(existingPrediction);
+        const sameOutcome = String(existingPrediction.outcome) === String(outcomeToStore);
+        if (sameOutcome) {
+          return res.status(409).json({
+            message: 'You already have a free prediction on this pick. Use Add Tickets to stake more.',
+            code: 'FREE_PREDICTION_EXISTS',
+            prediction: existingPrediction,
+          });
+        }
+        return res.status(400).json({
+          message: 'You can only add tickets to your current pick. Outcome cannot be changed.',
+          code: 'FREE_OUTCOME_LOCKED',
+        });
       }
       return res.status(400).json({ message: 'You already predicted this item' });
     }
@@ -191,6 +199,75 @@ router.post('/free', auth, async (req, res) => {
     res.status(201).json({
       prediction,
       ticketsStaked: ticketsCount,
+      remaining,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message, details: error.details });
+  }
+});
+
+// Add tickets to an existing free prediction (same outcome only)
+router.post('/free/:predictionId/add-tickets', auth, async (req, res) => {
+  try {
+    const { assertPhoneVerified } = require('../services/phoneVerificationService');
+    const userForPhone = await User.findById(req.user._id).select('phone phoneVerified');
+    assertPhoneVerified(userForPhone);
+
+    const ticketsToAdd = Math.max(1, parseInt(req.body.ticketsToAdd, 10) || 0);
+    const prediction = await Prediction.findById(req.params.predictionId)
+      .populate('match')
+      .populate('poll');
+
+    if (!prediction) {
+      return res.status(404).json({ message: 'Prediction not found' });
+    }
+    if (prediction.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    if (prediction.type !== 'free') {
+      return res.status(400).json({ message: 'This endpoint is only for free predictions' });
+    }
+
+    const item = prediction.match || prediction.poll;
+    if (!item) {
+      return res.status(400).json({ message: 'Event not found' });
+    }
+    if (item.freePredictionEnabled === false) {
+      return res.status(400).json({ message: 'Free prediction is disabled for this event' });
+    }
+    if (item.status === 'locked' || item.status === 'completed' || item.status === 'settled') {
+      return res.status(400).json({ message: 'Predictions are locked or completed' });
+    }
+    if (item.status !== 'upcoming' && item.status !== 'active') {
+      return res.status(400).json({ message: 'Cannot add tickets while event is not open' });
+    }
+
+    const minTickets = Math.max(1, parseInt(item.minFreeTickets, 10) || 1);
+    if (ticketsToAdd < minTickets) {
+      return res.status(400).json({
+        message: `Minimum ${minTickets} ticket(s) required per add`,
+        minTickets,
+      });
+    }
+
+    const balances = await getTicketBalances(req.user._id);
+    if (balances.totalSpendable < ticketsToAdd) {
+      return res.status(400).json({
+        message: 'Insufficient tickets',
+        required: ticketsToAdd,
+        ...balances,
+      });
+    }
+
+    await deductTickets(req.user._id, ticketsToAdd);
+    prediction.ticketsStaked = (prediction.ticketsStaked || 1) + ticketsToAdd;
+    prediction.updatedAt = new Date();
+    await prediction.save();
+
+    const remaining = await getTicketBalances(req.user._id);
+    res.json({
+      prediction,
+      ticketsAdded: ticketsToAdd,
       remaining,
     });
   } catch (error) {
@@ -234,10 +311,11 @@ router.post('/boost', auth, async (req, res) => {
       outcomeToStore = normalized;
     }
 
-    // Check if user already has a boost prediction
+    // One boost position per user per event per outcome
     const query = {
       user: req.user._id,
       type: 'boost',
+      outcome: outcomeToStore,
     };
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
@@ -269,16 +347,12 @@ router.post('/boost', auth, async (req, res) => {
 
     const existingBoostPrediction = await Prediction.findOne(query);
 
-    // If prediction exists and item is still upcoming, allow update
     if (existingBoostPrediction) {
-      if (item.status === 'upcoming' || item.status === 'active') {
-        // Update existing prediction with normalized outcome
-        existingBoostPrediction.outcome = outcomeToStore;
-        existingBoostPrediction.updatedAt = new Date();
-        await existingBoostPrediction.save();
-        return res.json(existingBoostPrediction);
-      }
-      return res.status(400).json({ message: 'You already have a boost prediction for this item' });
+      return res.status(409).json({
+        message: 'You already have a boost on this outcome. Use Add Stake to increase your position.',
+        code: 'BOOST_OUTCOME_EXISTS',
+        prediction: existingBoostPrediction,
+      });
     }
 
     // Get fees from settings
@@ -386,8 +460,8 @@ router.get('/match/:matchId/user', auth, async (req, res) => {
       query.type = type;
     }
     
-    // For market type, return all predictions (one per option)
-    if (type === 'market') {
+    // For market and boost types, return all predictions (one per option/outcome)
+    if (type === 'market' || type === 'boost') {
       const predictions = await Prediction.find(query)
         .populate('match', 'teamA teamB date status result isResolved');
       return res.json(predictions);
@@ -420,8 +494,8 @@ router.get('/poll/:pollId/user', auth, async (req, res) => {
       query.type = type;
     }
     
-    // For market type, return all predictions (one per option)
-    if (type === 'market') {
+    // For market and boost types, return all predictions (one per option/outcome)
+    if (type === 'market' || type === 'boost') {
       const predictions = await Prediction.find(query)
         .populate('poll', 'question type status result isResolved');
       return res.json(predictions);
@@ -460,6 +534,17 @@ router.put('/:predictionId', auth, async (req, res) => {
     const item = prediction.match || prediction.poll;
     if (!item || (item.status !== 'upcoming' && item.status !== 'active')) {
       return res.status(400).json({ message: 'Cannot update prediction. Item is not upcoming' });
+    }
+
+    if (prediction.type === 'free') {
+      return res.status(400).json({
+        message: 'Cannot change free prediction outcome. Add tickets to your current pick instead.',
+      });
+    }
+    if (prediction.type === 'boost') {
+      return res.status(400).json({
+        message: 'Cannot change boost outcome. Boost another option or add stake to this position.',
+      });
     }
     
     // Normalize outcome for matches to contract canonical form (TeamA, TeamB, Draw)

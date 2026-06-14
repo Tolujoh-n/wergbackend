@@ -424,6 +424,7 @@ router.post('/matches', async (req, res) => {
       marketInitialized,
       minFreeTickets,
       freePredictionEnabled,
+      marketEnabled,
       drawEnabled,
       startingPrices,
     } = req.body;
@@ -476,6 +477,7 @@ router.post('/matches', async (req, res) => {
               marketDrawLiquidity > 0),
       minFreeTickets: Math.max(1, parseInt(minFreeTickets, 10) || 1),
       freePredictionEnabled: freePredictionEnabled !== false,
+      marketEnabled: marketEnabled !== false,
       drawEnabled: drawEnabled !== false,
       startingPrices: normalizeStartingPricesRows(Array.isArray(startingPrices) ? startingPrices : []),
       isFeatured: isFeatured || false,
@@ -833,6 +835,7 @@ router.post('/polls', async (req, res) => {
       marketInitialized,
       minFreeTickets,
       freePredictionEnabled,
+      marketEnabled,
       startingPrices,
     } = req.body;
 
@@ -857,6 +860,7 @@ router.post('/polls', async (req, res) => {
       ...(orderbookContractAddressLower() ? { contractAddress: orderbookContractAddressLower() } : {}),
       minFreeTickets: Math.max(1, parseInt(minFreeTickets, 10) || 1),
       freePredictionEnabled: freePredictionEnabled !== false,
+      marketEnabled: marketEnabled !== false,
       startingPrices: normalizeStartingPricesRows(Array.isArray(startingPrices) ? startingPrices : []),
       isFeatured: isFeatured || false,
       isSponsored: isSponsored || false,

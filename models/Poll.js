@@ -64,6 +64,11 @@ const pollSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  /** When false, market/orderbook entry is hidden on list cards. */
+  marketEnabled: {
+    type: Boolean,
+    default: true,
+  },
   startingPrices: [
     {
       optionKey: { type: String },
