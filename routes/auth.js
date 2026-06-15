@@ -400,7 +400,9 @@ router.post('/wallets/link', auth, async (req, res) => {
     const address = req.body?.address || req.body?.walletAddress;
     const walletAddress = await linkWalletToUser({ userId: req.user._id, address });
     const { clearAdminCacheForWallet } = require('../services/contractAdminAccess');
+    const { scheduleNftHoldingsRefresh } = require('../services/ticketService');
     clearAdminCacheForWallet(walletAddress);
+    scheduleNftHoldingsRefresh(req.user._id, [walletAddress]);
     const user = await User.findById(req.user._id);
     return res.json({ ok: true, walletAddress, user: await toUserResponse(user) });
   } catch (error) {
@@ -427,6 +429,9 @@ router.post('/wallets/unlink', auth, async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to unlink this wallet' });
     }
     await WalletLink.deleteOne({ walletAddress });
+
+    const { scheduleNftHoldingsRefresh } = require('../services/ticketService');
+    scheduleNftHoldingsRefresh(req.user._id);
 
     // If this wallet was stored in legacy field, clear it (best-effort)
     const u = await User.findById(req.user._id).select('walletAddress').lean();

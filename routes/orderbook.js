@@ -13,6 +13,7 @@ const {
   getFees,
   positionKey,
   getOrderbookMarketActivity,
+  getMarketSnapshot,
   impliedProbabilityByOption,
 } = require('../services/orderbookService');
 const { getUserTradingPanel } = require('../services/orderbookTradingPanel');
@@ -242,6 +243,35 @@ router.get('/positions/mine/all', auth, async (req, res) => {
       .populate('poll', 'question status isResolved result optionType')
       .lean();
     res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+router.get('/market/:chainMarketId/snapshot', async (req, res) => {
+  try {
+    const chainMarketId = parseInt(req.params.chainMarketId, 10);
+    if (!Number.isFinite(chainMarketId)) {
+      return res.status(400).json({ message: 'Invalid chainMarketId' });
+    }
+    let optionKeys = [];
+    let startingPrices = [];
+    const keysParam = req.query.optionKeys;
+    if (keysParam) {
+      optionKeys = String(keysParam)
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
+    }
+    if (req.query.startingPrices) {
+      try {
+        startingPrices = JSON.parse(req.query.startingPrices);
+      } catch {
+        startingPrices = [];
+      }
+    }
+    const snapshot = await getMarketSnapshot(chainMarketId, optionKeys, startingPrices);
+    res.json(snapshot);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }

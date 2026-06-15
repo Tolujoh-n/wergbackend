@@ -94,6 +94,14 @@ const userSchema = new mongoose.Schema({
     sentAt: { type: Date },
     attempts: { type: Number, default: 0 },
   },
+  /** Cached on-chain NFT/FT bonus verification (fast free-page loads). */
+  nftHoldingsCache: {
+    rows: { type: mongoose.Schema.Types.Mixed, default: null },
+    walletScope: { type: String, default: '' },
+    additionalWallet: { type: String, default: '' },
+    configFingerprint: { type: String, default: '' },
+    verifiedAt: { type: Date },
+  },
 });
 
 userSchema.index({ phone: 1 }, { unique: true, sparse: true, partialFilterExpression: { phoneVerified: true } });

@@ -1079,6 +1079,69 @@ async function getOrderbookMarketActivity(chainMarketId, optionKeys, startingPri
   return { trades, impliedNow };
 }
 
+/**
+ * Single round-trip snapshot: all order books + trade tape + implied prices (no duplicate getBook).
+ */
+async function getMarketSnapshot(chainMarketId, optionKeys, startingPricesRows = []) {
+  const keys = (optionKeys || []).map((k) => String(k).trim()).filter(Boolean);
+  const booksByOption = {};
+
+  if (keys.length) {
+    await Promise.all(
+      keys.map(async (key) => {
+        try {
+          const [yesBook, noBook] = await Promise.all([
+            getBook(chainMarketId, key, 'YES'),
+            getBook(chainMarketId, key, 'NO'),
+          ]);
+          booksByOption[key] = { YES: yesBook, NO: noBook };
+        } catch {
+          booksByOption[key] = { YES: { bids: [], asks: [] }, NO: { bids: [], asks: [] } };
+        }
+      })
+    );
+  }
+
+  const raw = {};
+  for (const key of keys) {
+    const yesMid = midFromBookSide(booksByOption[key]?.YES?.bids, booksByOption[key]?.YES?.asks);
+    const noMid = midFromBookSide(booksByOption[key]?.NO?.bids, booksByOption[key]?.NO?.asks);
+    let p = null;
+    if (yesMid != null) p = yesMid;
+    else if (noMid != null) p = 1 - noMid;
+    if (p == null) {
+      const row = (startingPricesRows || []).find((r) => String(r.optionKey) === key);
+      const yp = Number(row?.yesPrice);
+      if (Number.isFinite(yp) && yp > 0 && yp < 1) p = yp;
+    }
+    raw[key] = Math.max(0.001, Math.min(0.999, p ?? 1 / Math.max(1, keys.length)));
+  }
+  const sum = Object.values(raw).reduce((a, b) => a + b, 0) || 1;
+  const impliedNow = {};
+  for (const k of Object.keys(raw)) impliedNow[k] = raw[k] / sum;
+
+  const orders = await Order.find({
+    ...withOrderbookContract({ chainMarketId }),
+    sizeFilled: { $gt: 0 },
+  })
+    .sort({ updatedAt: 1 })
+    .limit(400)
+    .select('optionKey side limitPrice sizeFilled updatedAt createdAt direction isMarketMaker')
+    .lean();
+
+  const trades = orders.map((o) => ({
+    t: o.updatedAt || o.createdAt,
+    optionKey: String(o.optionKey || ''),
+    side: o.side,
+    price: Number(o.limitPrice) || 0,
+    size: Number(o.sizeFilled) || 0,
+    direction: o.direction,
+    isMarketMaker: !!o.isMarketMaker,
+  }));
+
+  return { booksByOption, trades, impliedNow };
+}
+
 module.exports = {
   getFees,
   getOrderbookDefaults,
@@ -1107,4 +1170,5 @@ module.exports = {
   estimateImmediatelyMatchableSellShares,
   impliedProbabilityByOption,
   getOrderbookMarketActivity,
+  getMarketSnapshot,
 };

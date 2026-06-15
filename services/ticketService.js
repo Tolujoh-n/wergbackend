@@ -5,6 +5,11 @@ const { ethers } = require('ethers');
 const { getJsonRpcProvider } = require('../utils/chainConfig');
 const { anyWalletHoldsToken, normalizeTokenStandard } = require('../utils/tokenHoldings');
 
+/** Re-verify on-chain holdings in the background after this age. */
+const NFT_HOLDINGS_REFRESH_AFTER_MS = 5 * 60 * 1000;
+
+const refreshInFlight = new Set();
+
 function startOfUtcDay(d = new Date()) {
   const t = new Date(d);
   t.setUTCHours(0, 0, 0, 0);
@@ -63,6 +68,117 @@ function mergeWalletList(linked, additional = []) {
   return [...set];
 }
 
+function mergeWalletList(linked, additional = []) {
+  const set = new Set();
+  for (const w of [...(linked || []), ...(additional || [])]) {
+    const s = String(w || '').trim().toLowerCase();
+    if (s && ethers.isAddress(s)) set.add(s);
+  }
+  return [...set];
+}
+
+function buildWalletScope(wallets) {
+  return [...(wallets || [])]
+    .map((w) => String(w).toLowerCase())
+    .sort()
+    .join(',');
+}
+
+function buildConfigFingerprint(configBonuses) {
+  return (configBonuses || [])
+    .map((c, i) =>
+      [
+        c.id || `nft-bonus-${i}`,
+        c.contractAddress || '',
+        c.tokenStandard || '',
+        c.tokenId != null ? String(c.tokenId) : '',
+        c.dailyTickets || 0,
+      ].join(':')
+    )
+    .join('|');
+}
+
+function normalizeAdditionalWallet(additionalWallets = []) {
+  const list = mergeWalletList([], additionalWallets);
+  return list[0] || '';
+}
+
+function isCacheHit(cache, walletScope, additionalKey, configFp) {
+  if (!cache?.verifiedAt || !Array.isArray(cache.rows)) return false;
+  return (
+    cache.walletScope === walletScope &&
+    cache.additionalWallet === additionalKey &&
+    cache.configFingerprint === configFp
+  );
+}
+
+function isCacheStale(cache, maxAgeMs = NFT_HOLDINGS_REFRESH_AFTER_MS) {
+  if (!cache?.verifiedAt) return true;
+  return Date.now() - new Date(cache.verifiedAt).getTime() > maxAgeMs;
+}
+
+function mergeCacheWithConfig(cacheRows, configBonuses) {
+  const holdMap = new Map((cacheRows || []).map((r) => [String(r.id), r]));
+  return configBonuses.map((cfg, i) => {
+    const id = cfg.id || `nft-bonus-${i}`;
+    const cached = holdMap.get(String(id));
+    return {
+      id,
+      name: cfg.name || '',
+      contractAddress: cfg.contractAddress || '',
+      imageUrl: cfg.imageUrl || '',
+      dailyTickets: Math.max(0, parseInt(cfg.dailyTickets, 10) || 0),
+      link: cfg.link || '',
+      tokenStandard: normalizeTokenStandard(cfg),
+      tokenId: cfg.tokenId != null && cfg.tokenId !== '' ? String(cfg.tokenId) : '',
+      holds: cached?.holds ?? false,
+      holdsOnConnectedOnly: cached?.holdsOnConnectedOnly ?? false,
+      verifiedOnChain: true,
+    };
+  });
+}
+
+async function saveNftHoldingsCache(userId, rows, walletScope, additionalKey, configFp) {
+  await User.findByIdAndUpdate(userId, {
+    nftHoldingsCache: {
+      rows: (rows || []).map((r) => ({
+        id: r.id,
+        holds: !!r.holds,
+        holdsOnConnectedOnly: !!r.holdsOnConnectedOnly,
+      })),
+      walletScope,
+      additionalWallet: additionalKey,
+      configFingerprint: configFp,
+      verifiedAt: new Date(),
+    },
+  });
+}
+
+async function refreshNftHoldingsCache(userId, { additionalWallets = [] } = {}) {
+  const additionalKey = normalizeAdditionalWallet(additionalWallets);
+  const inFlightKey = `${userId}:${additionalKey}`;
+  if (refreshInFlight.has(inFlightKey)) return;
+  refreshInFlight.add(inFlightKey);
+  try {
+    const linkedWallets = await userLinkedWallets(userId);
+    const configBonuses = await getNftTicketBonuses();
+    const configFp = buildConfigFingerprint(configBonuses);
+    const walletScope = buildWalletScope(linkedWallets);
+    const rows = await getNftBonusesForUser(userId, { additionalWallets });
+    await saveNftHoldingsCache(userId, rows, walletScope, additionalKey, configFp);
+  } catch (e) {
+    console.warn('refreshNftHoldingsCache', e?.message || e);
+  } finally {
+    refreshInFlight.delete(inFlightKey);
+  }
+}
+
+function scheduleNftHoldingsRefresh(userId, additionalWallets = []) {
+  setImmediate(() => {
+    refreshNftHoldingsCache(userId, { additionalWallets }).catch(() => {});
+  });
+}
+
 async function nftBonusTicketsForUser(userId) {
   const list = await getNftBonusesForUser(userId);
   return list.reduce((sum, n) => sum + (n.holds ? (n.dailyTickets || 0) : 0), 0);
@@ -96,7 +212,7 @@ async function getNftBonusesForUser(userId = null, { additionalWallets = [] } = 
   const linkedSet = new Set(linkedWallets.map((w) => String(w).toLowerCase()));
 
   const rows = await Promise.all(
-    bonuses.map(async (cfg) => {
+    bonuses.map(async (cfg, i) => {
       const perNft = Math.max(0, parseInt(cfg.dailyTickets, 10) || 0);
       let holds = false;
       let holdsOnConnectedOnly = false;
@@ -112,7 +228,7 @@ async function getNftBonusesForUser(userId = null, { additionalWallets = [] } = 
         }
       }
       return {
-        id: cfg.id,
+        id: cfg.id || `nft-bonus-${i}`,
         name: cfg.name || '',
         contractAddress: cfg.contractAddress || '',
         imageUrl: cfg.imageUrl || '',
@@ -148,9 +264,9 @@ async function getNftBonusesConfigRows() {
 }
 
 /**
- * @returns {{ normalTickets: number, goldenTickets: number, nftBonusToday: number, dailyLimit: number, totalSpendable: number }}
+ * @returns {{ normalTickets: number, goldenTickets: number, nftBonusToday: number, dailyLimit: number, totalSpendable: number, nftBonuses: Array, holdingsRefreshing?: boolean, holdingsCachedAt?: Date }}
  */
-async function getTicketBalances(userId, { additionalWallets = [] } = {}) {
+async function getTicketBalances(userId, { additionalWallets = [], forceVerify = false } = {}) {
   let user = await User.findById(userId);
   if (!user) {
     const err = new Error('User not found');
@@ -165,7 +281,41 @@ async function getTicketBalances(userId, { additionalWallets = [] } = {}) {
   }
   user = await User.findById(userId);
   user = await resetDailyTicketsIfNeeded(user);
-  const nftBonusList = await getNftBonusesForUser(userId, { additionalWallets });
+
+  const linkedWallets = await userLinkedWallets(userId);
+  const walletScope = buildWalletScope(linkedWallets);
+  const additionalKey = normalizeAdditionalWallet(additionalWallets);
+  const configBonuses = await getNftTicketBonuses();
+  const configFp = buildConfigFingerprint(configBonuses);
+
+  let holdingsRefreshing = false;
+  let holdingsCachedAt = null;
+  let nftBonusList;
+
+  if (forceVerify) {
+    nftBonusList = await getNftBonusesForUser(userId, { additionalWallets });
+    await saveNftHoldingsCache(userId, nftBonusList, walletScope, additionalKey, configFp);
+    holdingsCachedAt = new Date();
+  } else {
+    const cache = user.nftHoldingsCache;
+    const cacheHit = isCacheHit(cache, walletScope, additionalKey, configFp);
+
+    if (cacheHit) {
+      nftBonusList = mergeCacheWithConfig(cache.rows, configBonuses);
+      holdingsCachedAt = cache.verifiedAt;
+      if (isCacheStale(cache)) {
+        holdingsRefreshing = true;
+        scheduleNftHoldingsRefresh(userId, additionalWallets);
+      }
+    } else {
+      nftBonusList = await getNftBonusesConfigRows();
+      if (linkedWallets.length || additionalWallets.length) {
+        holdingsRefreshing = true;
+        scheduleNftHoldingsRefresh(userId, additionalWallets);
+      }
+    }
+  }
+
   const nftBonus = nftBonusList.reduce((s, n) => s + (n.holds ? (n.dailyTickets || 0) : 0), 0);
   const dailyLimit = await getDailyFreeTicketsLimit();
   const normalTickets = Math.max(0, (user.tickets || 0) + nftBonus);
@@ -177,6 +327,8 @@ async function getTicketBalances(userId, { additionalWallets = [] } = {}) {
     dailyLimit,
     totalSpendable: normalTickets + goldenTickets,
     nftBonuses: nftBonusList,
+    holdingsRefreshing,
+    holdingsCachedAt,
   };
 }
 
@@ -185,7 +337,7 @@ async function getTicketBalances(userId, { additionalWallets = [] } = {}) {
  * Prefer spend normal daily tickets first, then golden.
  */
 async function deductTickets(userId, amount) {
-  const balances = await getTicketBalances(userId);
+  const balances = await getTicketBalances(userId, { forceVerify: true });
   if (balances.totalSpendable < amount) {
     const err = new Error('Insufficient tickets');
     err.statusCode = 400;
@@ -252,4 +404,6 @@ module.exports = {
   resetDailyTicketsIfNeeded,
   nftBonusTicketsForUser,
   getNftBonusesForUser,
+  scheduleNftHoldingsRefresh,
+  refreshNftHoldingsCache,
 };

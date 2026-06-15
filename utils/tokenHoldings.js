@@ -102,15 +102,18 @@ async function anyWalletHoldsToken(wallets, cfg, provider) {
   const addr = String(cfg?.contractAddress || '').trim();
   if (!addr || !ethers.isAddress(addr)) return false;
 
+  const checks = [];
   for (const w of wallets) {
     try {
       const owner = ethers.getAddress(String(w).trim());
-      if (await ownerHoldsToken(provider, addr, owner, cfg)) return true;
+      checks.push(ownerHoldsToken(provider, addr, owner, cfg));
     } catch {
-      /* invalid address */
+      checks.push(Promise.resolve(false));
     }
   }
-  return false;
+  if (!checks.length) return false;
+  const results = await Promise.all(checks);
+  return results.some(Boolean);
 }
 
 module.exports = {

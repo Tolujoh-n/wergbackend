@@ -51,14 +51,12 @@ router.get('/nft-bonuses', optionalAuth, async (req, res) => {
 /** Re-verify on-chain holdings for linked + optional connected wallet (auth required). */
 router.get('/verify-holdings', auth, async (req, res) => {
   try {
-    const rawWallet = req.query.walletAddress != null ? String(req.query.walletAddress).trim() : '';
-    const additionalWallets =
-      rawWallet && /^0x[a-fA-F0-9]{40}$/.test(rawWallet) ? [rawWallet.toLowerCase()] : [];
-    const balances = await getTicketBalances(req.user._id);
-    const nftBonuses = await getNftBonusesForUser(req.user._id, { additionalWallets });
+    const additionalWallets = parseOptionalWalletQuery(req);
+    const balances = await getTicketBalances(req.user._id, { additionalWallets, forceVerify: true });
+    const goldenRanges = await getGoldenTicketBoostRanges();
     res.json({
       ...balances,
-      nftBonuses,
+      goldenTicketBoostRanges: goldenRanges,
       walletChecked: additionalWallets[0] || null,
     });
   } catch (e) {
