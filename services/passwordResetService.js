@@ -3,7 +3,7 @@ const {
   hashResetCode,
   maskEmail,
 } = require('../utils/passwordReset');
-const { isSendgridConfigured, sendPasswordResetEmail } = require('../utils/sendgrid');
+const { shouldSendViaSendgrid, isDevEmailOtpLogEnabled, logDevEmailOtp, sendPasswordResetEmail } = require('../utils/sendgrid');
 
 const TTL_MINUTES = () => parseInt(process.env.PASSWORD_RESET_CODE_TTL_MINUTES || '10', 10);
 const RESEND_SECONDS = () =>
@@ -18,13 +18,11 @@ const RESEND_SECONDS = () =>
   );
 
 function isDevPasswordReset() {
-  return (
-    process.env.PASSWORD_RESET_DEV_LOG === 'true' || process.env.EMAIL_VERIFY_DEV_LOG === 'true'
-  );
+  return isDevEmailOtpLogEnabled();
 }
 
 function assertCanSendPasswordResetEmail() {
-  if (isSendgridConfigured()) return;
+  if (shouldSendViaSendgrid()) return;
   if (isDevPasswordReset()) return;
   const err = new Error(
     'Password reset email is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL on the server. For local dev, set PASSWORD_RESET_DEV_LOG=true.'
@@ -75,7 +73,7 @@ async function sendPasswordResetCode(user) {
   const code = generateNumericCode();
 
   user.passwordReset = {
-    provider: isSendgridConfigured() ? 'sendgrid' : 'local',
+    provider: shouldSendViaSendgrid() ? 'sendgrid' : 'local',
     codeHash: hashResetCode(code),
     verifiedAt: null,
     expiresAt: new Date(Date.now() + minutesValid * 60 * 1000),
@@ -85,7 +83,7 @@ async function sendPasswordResetCode(user) {
   await user.save();
 
   try {
-    if (isSendgridConfigured()) {
+    if (shouldSendViaSendgrid()) {
       await sendPasswordResetEmail({
         to: email,
         code,
@@ -93,7 +91,7 @@ async function sendPasswordResetCode(user) {
         appName: process.env.APP_NAME,
       });
     } else {
-      console.log('[passwordReset] DEV — code for', email, ':', code);
+      logDevEmailOtp('passwordReset', email, code, minutesValid);
     }
   } catch (e) {
     clearPasswordReset(user);
@@ -108,7 +106,7 @@ async function sendPasswordResetCode(user) {
     emailMasked: maskEmail(email),
     expiresInMinutes: minutesValid,
     resendAfterSeconds: RESEND_SECONDS(),
-    dev: !isSendgridConfigured(),
+    dev: isDevPasswordReset() || !shouldSendViaSendgrid(),
   };
 }
 

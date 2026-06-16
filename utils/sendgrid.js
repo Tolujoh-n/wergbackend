@@ -1,7 +1,28 @@
 const sgMail = require('@sendgrid/mail');
 
+function isDevEmailOtpLogEnabled() {
+  return (
+    process.env.EMAIL_VERIFY_DEV_LOG === 'true' || process.env.PASSWORD_RESET_DEV_LOG === 'true'
+  );
+}
+
 function isSendgridConfigured() {
   return !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL);
+}
+
+/** Send via SendGrid only when configured and dev console logging is off. */
+function shouldSendViaSendgrid() {
+  return isSendgridConfigured() && !isDevEmailOtpLogEnabled();
+}
+
+function logDevEmailOtp(label, email, code, minutesValid = 10) {
+  const line = '='.repeat(52);
+  console.log(`\n${line}`);
+  console.log(`[${label}] DEV — OTP (SendGrid skipped)`);
+  console.log(`  Email:   ${email}`);
+  console.log(`  Code:    ${code}`);
+  console.log(`  Expires: ${minutesValid} minute(s)`);
+  console.log(`${line}\n`);
 }
 
 function getSendgridConfigured() {
@@ -123,6 +144,9 @@ async function sendFreePlayVerificationEmail({ to, code, minutesValid, appName, 
 
 module.exports = {
   isSendgridConfigured,
+  isDevEmailOtpLogEnabled,
+  shouldSendViaSendgrid,
+  logDevEmailOtp,
   getSendgridConfigured,
   getSendgridFromEmail,
   sendPasswordResetEmail,

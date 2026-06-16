@@ -5,7 +5,12 @@ const {
   maskEmail,
 } = require('../utils/emailVerification');
 const { assertAllowedEmail, normalizeEmail } = require('../utils/disposableEmail');
-const { isSendgridConfigured, sendFreePlayVerificationEmail } = require('../utils/sendgrid');
+const {
+  shouldSendViaSendgrid,
+  isDevEmailOtpLogEnabled,
+  logDevEmailOtp,
+  sendFreePlayVerificationEmail,
+} = require('../utils/sendgrid');
 
 const RESEND_SECONDS = () =>
   Math.max(30, parseInt(process.env.EMAIL_VERIFY_RESEND_SECONDS || '60', 10));
@@ -14,15 +19,11 @@ const MAX_ATTEMPTS = () => parseInt(process.env.EMAIL_VERIFY_MAX_ATTEMPTS || '5'
 const VALID_DAYS = () => Math.max(1, parseInt(process.env.EMAIL_VERIFY_VALID_DAYS || '30', 10));
 const VALID_MS = () => VALID_DAYS() * 24 * 60 * 60 * 1000;
 
-function isDevEmailVerify() {
-  return process.env.EMAIL_VERIFY_DEV_LOG === 'true' || process.env.PASSWORD_RESET_DEV_LOG === 'true';
-}
-
 function assertCanSendEmail() {
-  if (isSendgridConfigured()) return;
-  if (isDevEmailVerify()) return;
+  if (shouldSendViaSendgrid()) return;
+  if (isDevEmailOtpLogEnabled()) return;
   const err = new Error(
-    'Email verification is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL on the server.'
+    'Email verification is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL on the server, or set EMAIL_VERIFY_DEV_LOG=true for local testing.'
   );
   err.statusCode = 503;
   throw err;
@@ -173,7 +174,7 @@ async function sendVerificationCode(userId, requestedEmail = null) {
   await user.save();
 
   try {
-    if (isSendgridConfigured()) {
+    if (shouldSendViaSendgrid()) {
       await sendFreePlayVerificationEmail({
         to: targetEmail,
         code,
@@ -183,7 +184,7 @@ async function sendVerificationCode(userId, requestedEmail = null) {
         isReverify,
       });
     } else {
-      console.log('[emailVerify] DEV — code for', targetEmail, ':', code);
+      logDevEmailOtp('emailVerify', targetEmail, code, minutesValid);
     }
   } catch (e) {
     user.freePlayEmailVerification = {
@@ -205,7 +206,7 @@ async function sendVerificationCode(userId, requestedEmail = null) {
     expiresInMinutes: minutesValid,
     resendAfterSeconds: RESEND_SECONDS(),
     isReverify,
-    dev: !isSendgridConfigured(),
+    dev: isDevEmailOtpLogEnabled() || !shouldSendViaSendgrid(),
   };
 }
 
