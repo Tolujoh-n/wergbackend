@@ -12,6 +12,22 @@ const userSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
+  /** Verified for free predictions (email OTP). */
+  emailVerified: {
+    type: Boolean,
+    default: false,
+  },
+  /** Last successful free-play email OTP verification (re-verify every 30 days). */
+  emailVerifiedAt: {
+    type: Date,
+  },
+  freePlayEmailVerification: {
+    codeHash: { type: String },
+    expiresAt: { type: Date },
+    sentAt: { type: Date },
+    attempts: { type: Number, default: 0 },
+    pendingEmail: { type: String },
+  },
   password: {
     type: String,
   },
@@ -79,7 +95,7 @@ const userSchema = new mongoose.Schema({
     sentAt: { type: Date },
     attempts: { type: Number, default: 0 },
   },
-  /** E.164 format, e.g. +14155552671 */
+  /** @deprecated SMS verification — legacy field kept for existing users. */
   phone: {
     type: String,
     trim: true,

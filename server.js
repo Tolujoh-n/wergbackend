@@ -20,6 +20,8 @@ const { corsOptions, applyCorsHeaders } = require('./utils/corsConfig');
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use(applyCorsHeaders);
 app.use(cors(corsOptions()));
 app.use(applyCorsHeaders);

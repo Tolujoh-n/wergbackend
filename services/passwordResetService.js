@@ -11,7 +11,7 @@ const RESEND_SECONDS = () =>
     30,
     parseInt(
       process.env.PASSWORD_RESET_RESEND_SECONDS ||
-        process.env.PHONE_VERIFY_RESEND_SECONDS ||
+        process.env.EMAIL_VERIFY_RESEND_SECONDS ||
         '60',
       10
     )
@@ -19,7 +19,7 @@ const RESEND_SECONDS = () =>
 
 function isDevPasswordReset() {
   return (
-    process.env.PASSWORD_RESET_DEV_LOG === 'true' || process.env.PHONE_VERIFY_DEV_LOG === 'true'
+    process.env.PASSWORD_RESET_DEV_LOG === 'true' || process.env.EMAIL_VERIFY_DEV_LOG === 'true'
   );
 }
 
@@ -112,9 +112,16 @@ async function sendPasswordResetCode(user) {
   };
 }
 
+function normalizeResetCode(codeRaw) {
+  return String(codeRaw || '').trim().replace(/\D/g, '');
+}
+
 async function verifyPasswordResetCode(user, codeRaw) {
-  const code = String(codeRaw || '').trim();
-  if (!user?.email || !code) {
+  const code = normalizeResetCode(codeRaw);
+  if (code.length !== 6) {
+    return false;
+  }
+  if (!user?.email) {
     return false;
   }
 
@@ -157,12 +164,62 @@ async function verifyPasswordResetCode(user, codeRaw) {
 
 function isPasswordResetVerified(user) {
   const pr = user?.passwordReset || {};
-  if (!pr.verifiedAt || !pr.expiresAt) return false;
+  if (!pr.verifiedAt || !pr.expiresAt || !pr.codeHash) return false;
   return pr.expiresAt.getTime() >= Date.now();
+}
+
+/**
+ * Final step: re-check code + verified window, then set new password.
+ */
+async function confirmPasswordReset(user, codeRaw, newPassword) {
+  if (!user?.email) {
+    const err = new Error('Invalid or expired code. Verify your code again.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const code = normalizeResetCode(codeRaw);
+  if (code.length !== 6) {
+    const err = new Error('Enter the 6-digit verification code');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!isPasswordResetVerified(user)) {
+    const err = new Error('Invalid or expired code. Verify your code again.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const pr = user.passwordReset || {};
+  if (pr.codeHash !== hashResetCode(code)) {
+    const err = new Error('Invalid or expired code');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (String(newPassword).length < 8) {
+    const err = new Error('Password must be at least 8 characters');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  user.password = newPassword;
+  user.passwordReset = {
+    provider: null,
+    codeHash: null,
+    verifiedAt: null,
+    expiresAt: null,
+    sentAt: null,
+    attempts: 0,
+  };
+  await user.save();
+  return { ok: true };
 }
 
 module.exports = {
   sendPasswordResetCode,
   verifyPasswordResetCode,
   isPasswordResetVerified,
+  confirmPasswordReset,
 };

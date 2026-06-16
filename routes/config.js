@@ -15,6 +15,16 @@ function checksumOrNull(raw) {
   }
 }
 
+const { isTurnstileConfigured } = require('../middleware/turnstile');
+
+/** Public security config for frontend (Turnstile site key). */
+router.get('/security', (req, res) => {
+  res.json({
+    turnstileSiteKey: process.env.TURNSTILE_SITE_KEY || process.env.REACT_APP_TURNSTILE_SITE_KEY || null,
+    turnstileEnabled: isTurnstileConfigured(),
+  });
+});
+
 /** Public chain + deployment addresses (frontend must match backend after redeploy). */
 router.get('/blockchain', (req, res) => {
   const contractAddress = getContractAddress();

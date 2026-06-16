@@ -106,9 +106,12 @@ router.get('/user', auth, async (req, res) => {
 // Create free prediction (ticket-weighted for jackpot)
 router.post('/free', auth, async (req, res) => {
   try {
-    const { assertPhoneVerified } = require('../services/phoneVerificationService');
-    const userForPhone = await User.findById(req.user._id).select('phone phoneVerified');
-    assertPhoneVerified(userForPhone);
+    const { assertEmailVerified, ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
+    const userForEmail = await User.findById(req.user._id).select(
+      'email emailVerified emailVerifiedAt phoneVerified freePlayEmailVerification'
+    );
+    await ensureLegacyEmailVerifiedAt(userForEmail);
+    assertEmailVerified(userForEmail);
 
     const { matchId, pollId, outcome, ticketsToStake } = req.body;
     const ticketsCount = Math.max(1, parseInt(ticketsToStake, 10) || 1);
@@ -209,9 +212,12 @@ router.post('/free', auth, async (req, res) => {
 // Add tickets to an existing free prediction (same outcome only)
 router.post('/free/:predictionId/add-tickets', auth, async (req, res) => {
   try {
-    const { assertPhoneVerified } = require('../services/phoneVerificationService');
-    const userForPhone = await User.findById(req.user._id).select('phone phoneVerified');
-    assertPhoneVerified(userForPhone);
+    const { assertEmailVerified, ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
+    const userForEmail = await User.findById(req.user._id).select(
+      'email emailVerified emailVerifiedAt phoneVerified freePlayEmailVerification'
+    );
+    await ensureLegacyEmailVerifiedAt(userForEmail);
+    assertEmailVerified(userForEmail);
 
     const ticketsToAdd = Math.max(1, parseInt(req.body.ticketsToAdd, 10) || 0);
     const prediction = await Prediction.findById(req.params.predictionId)

@@ -3,12 +3,19 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WalletLink = require('../models/WalletLink');
 const { auth } = require('../middleware/auth');
-const { sendPasswordResetCode, verifyPasswordResetCode, isPasswordResetVerified } = require('../services/passwordResetService');
+const { loginRateLimit, signupRateLimit } = require('../middleware/ipRateLimit');
+const { requireTurnstile } = require('../middleware/turnstile');
+const {
+  sendPasswordResetCode,
+  verifyPasswordResetCode,
+  confirmPasswordReset,
+} = require('../services/passwordResetService');
 const {
   sendVerificationCode,
-  verifyPhoneCode,
-  phoneStatusForUser,
-} = require('../services/phoneVerificationService');
+  verifyEmailCode,
+  emailStatusForUser,
+} = require('../services/emailVerificationService');
+const { assertAllowedEmail } = require('../utils/disposableEmail');
 
 const router = express.Router();
 
@@ -67,7 +74,7 @@ async function toUserResponse(user, options = {}) {
       tickets: normalTickets,
       goldenTickets,
       totalTickets: normalTickets + goldenTickets,
-      ...phoneStatusForUser(user),
+      ...emailStatusForUser(user),
     };
   }
 
@@ -96,7 +103,7 @@ async function toUserResponse(user, options = {}) {
     tickets: ticketInfo.normalTickets ?? user.tickets ?? 0,
     goldenTickets: ticketInfo.goldenTickets ?? user.goldenTickets ?? 0,
     totalTickets: ticketInfo.totalSpendable,
-    ...phoneStatusForUser(user),
+    ...emailStatusForUser(user),
   };
 }
 
@@ -136,11 +143,11 @@ async function linkWalletToUser({ userId, address }) {
 }
 
 // Signup with email/password
-router.post('/signup', async (req, res) => {
+router.post('/signup', signupRateLimit, requireTurnstile, async (req, res) => {
   try {
     const { email, password, username } = req.body;
 
-    const normalizedEmail = email ? String(email).trim().toLowerCase() : '';
+    const normalizedEmail = email ? assertAllowedEmail(email) : '';
     const normalizedUsername = username ? String(username).trim() : '';
 
     if (!normalizedEmail || !normalizedUsername || !password) {
@@ -174,7 +181,7 @@ router.post('/signup', async (req, res) => {
 });
 
 // Login with email OR username + password
-router.post('/login', async (req, res) => {
+router.post('/login', loginRateLimit, requireTurnstile, async (req, res) => {
   try {
     const { password } = req.body;
     const identifier = (req.body.identifier || req.body.email || '').trim();
@@ -264,11 +271,17 @@ router.post('/password-reset/verify', async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired code' });
     }
 
-    return res.json({ verified: true });
+    return res.json({ verified: true, emailMasked: maskEmailForResponse(user.email) });
   } catch (error) {
-    return res.status(500).json({ message: 'Verification failed' });
+    const code = error.statusCode || 500;
+    return res.status(code).json({ message: error.message || 'Verification failed' });
   }
 });
+
+function maskEmailForResponse(email) {
+  const { maskEmail } = require('../utils/passwordReset');
+  return maskEmail(email);
+}
 
 // Confirm password reset (email + code + newPassword)
 router.post('/password-reset/confirm', async (req, res) => {
@@ -281,29 +294,16 @@ router.post('/password-reset/confirm', async (req, res) => {
       return res.status(400).json({ message: 'Email, code, and new password are required' });
     }
 
-    if (String(newPassword).length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters' });
-    }
-
     const user = await findUserByEmailCaseInsensitive(email);
-    if (!user || !isPasswordResetVerified(user)) {
+    if (!user) {
       return res.status(400).json({ message: 'Invalid or expired code. Verify your code again.' });
     }
 
-    user.password = newPassword;
-    user.passwordReset = {
-      provider: null,
-      codeHash: null,
-      verifiedAt: null,
-      expiresAt: null,
-      sentAt: null,
-      attempts: 0,
-    };
-    await user.save();
+    await confirmPasswordReset(user, code, newPassword);
 
     return res.json({ message: 'Password updated successfully' });
   } catch (error) {
-    return res.status(500).json({ message: 'Password reset failed' });
+    return res.status(error.statusCode || 500).json({ message: error.message || 'Password reset failed' });
   }
 });
 
@@ -476,7 +476,11 @@ router.post('/google', async (req, res) => {
         n += 1;
         username = `${baseUsername}${n}`;
       }
-      user = new User({ email, username, password: null });
+      user = new User({ email, username, password: null, emailVerified: true, emailVerifiedAt: new Date() });
+      await user.save();
+    } else if (!user.emailVerifiedAt && email) {
+      user.emailVerified = true;
+      user.emailVerifiedAt = new Date();
       await user.save();
     }
 
@@ -492,6 +496,8 @@ router.post('/google', async (req, res) => {
 router.get('/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
+    const { ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
+    await ensureLegacyEmailVerifiedAt(user);
     await ensureLegacyWalletLink(user);
     res.json({ user: await toUserResponse(user) });
   } catch (error) {
@@ -499,46 +505,46 @@ router.get('/me', auth, async (req, res) => {
   }
 });
 
-// Phone verification (free predictions anti-spam)
-router.get('/phone/status', auth, async (req, res) => {
+// Email verification (free predictions anti-spam)
+router.get('/email/status', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('phone phoneVerified phoneVerification');
-    res.json(phoneStatusForUser(user));
+    const user = await User.findById(req.user._id).select(
+      'email emailVerified emailVerifiedAt freePlayEmailVerification phoneVerified'
+    );
+    const { ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
+    await ensureLegacyEmailVerifiedAt(user);
+    res.json(emailStatusForUser(user));
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-router.post('/phone/send-code', auth, async (req, res) => {
+router.post('/email/send-code', auth, async (req, res) => {
   try {
-    const countryDialCode = req.body.countryDialCode ?? req.body.countryCode;
-    const nationalNumber = req.body.phoneNumber ?? req.body.nationalNumber;
-    if (!countryDialCode || !nationalNumber) {
-      return res.status(400).json({ message: 'Country code and phone number are required' });
-    }
-    const result = await sendVerificationCode(req.user._id, countryDialCode, nationalNumber);
+    const requestedEmail = req.body.email != null ? String(req.body.email).trim() : null;
+    const result = await sendVerificationCode(req.user._id, requestedEmail || undefined);
     res.json({
-      message: 'Verification code sent',
+      message: 'Verification code sent to your email',
       ...result,
     });
   } catch (e) {
     const code = e.statusCode || 500;
-    const body = { message: e.message || 'Failed to send code' };
+    const body = { message: e.message || 'Failed to send code', code: e.code || undefined };
     if (e.retryAfterSeconds != null) body.retryAfterSeconds = e.retryAfterSeconds;
     res.status(code).json(body);
   }
 });
 
-router.post('/phone/verify', auth, async (req, res) => {
+router.post('/email/verify', auth, async (req, res) => {
   try {
     const code = (req.body.code || '').trim();
     if (!code) {
       return res.status(400).json({ message: 'Verification code is required' });
     }
-    const result = await verifyPhoneCode(req.user._id, code);
+    const result = await verifyEmailCode(req.user._id, code);
     const user = await User.findById(req.user._id).select('-password');
     res.json({
-      message: 'Phone verified successfully',
+      message: 'Email verified successfully',
       ...result,
       user: await toUserResponse(user),
     });
