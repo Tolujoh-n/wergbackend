@@ -40,7 +40,7 @@ function isRestingLiquidityOrder(order, bookPrices) {
   return false;
 }
 
-/** Limit crosses the spread — unfilled size belongs in pending settlement, not passive book. */
+/** Limit crosses the spread ΓÇö unfilled size belongs in pending settlement, not passive book. */
 function isCrossingOrder(order, bookPrices) {
   const rem = Number(order.sizeRemaining) || 0;
   if (rem <= 1e-9) return false;
@@ -166,8 +166,9 @@ async function getUserTradingPanel(userId, chainMarketId) {
       !fullyFilled &&
       !buyFillInPositions &&
       (crossingUnfilled ||
-        (remaining > 1e-9 && st === 'partially_filled') ||
-        (filled > 1e-9 && (settlementPending || fillNotInPositionYet)));
+        (remaining > 1e-9 && (st === 'partially_filled' || st === 'pending')) ||
+        (filled > 1e-9 && (settlementPending || fillNotInPositionYet)) ||
+        (String(o.orderKind || '').toLowerCase() === 'market' && remaining > 1e-9 && ACTIVE_STATUSES.includes(st)));
 
     if (isSettling) {
       settlingOrders.push({

@@ -640,6 +640,45 @@ function buildSettlementLegs(incomingDoc, fills) {
   };
 }
 
+async function finalizeOrderStatus(orderId) {
+  let doc = await Order.findById(orderId).lean();
+  if (!doc || doc.status !== 'pending') return doc;
+  const nextStatus =
+    Number(doc.sizeRemaining) <= 1e-9
+      ? 'filled'
+      : Number(doc.sizeFilled) > 1e-9
+        ? 'partially_filled'
+        : 'open';
+  await Order.updateOne({ _id: orderId }, { $set: { status: nextStatus } });
+  return Order.findById(orderId).lean();
+}
+
+/** Match, ledger, on-chain settlement, and MM top-up — run after HTTP response. */
+async function runPostPlaceCompletion(createdId, item, kind, fees, orderKind, ledgerApply) {
+  try {
+    if (ledgerApply) {
+      await applyLegsToOrderbookPositions(ledgerApply.chainMarketId, ledgerApply.legs, ledgerApply.contractLower);
+      await SettlementOutbox.updateOne(
+        { _id: ledgerApply.outId },
+        { $set: { positionsLedgerApplied: true, updatedAt: new Date() } }
+      );
+    }
+    if (orderKind === 'market') {
+      try {
+        const { ensureQuotesForDoc } = require('./marketMakerQuotes');
+        await ensureQuotesForDoc(item, kind);
+      } catch (e) {
+        console.warn('orderbook mm quote after place:', e.message || e);
+      }
+    }
+    await tryCompleteUserOrderFill(createdId, item, kind, fees);
+    await processSettlementOutboxBatch(8);
+    await finalizeOrderStatus(createdId);
+  } catch (e) {
+    console.error('runPostPlaceCompletion', String(createdId), e.message || e);
+  }
+}
+
 async function placeOrder(payload) {
   const {
     userId,
@@ -685,39 +724,25 @@ async function placeOrder(payload) {
 
   let px;
   if (orderKind === 'market') {
-    if (!isMarketMaker) {
-      try {
-        const { ensureQuotesForDoc } = require('./marketMakerQuotes');
-        await ensureQuotesForDoc(item, kind);
-      } catch (e) {
-        console.warn('orderbook mm pre-quote before market order:', e.message || e);
-      }
-    }
     const oppositeDir = direction === 'buy' ? 'sell' : 'buy';
     const sort = direction === 'buy' ? { limitPrice: 1 } : { limitPrice: -1 };
-    const findBest = () =>
-      Order.findOne(
-        withOrderbookContract({
-          chainMarketId: item.marketId,
-          optionKey,
-          side,
-          direction: oppositeDir,
-          status: { $in: ['open', 'partially_filled'] },
-        })
-      ).sort(sort);
-
-    let best = await findBest();
+    const best = await Order.findOne(
+      withOrderbookContract({
+        chainMarketId: item.marketId,
+        optionKey,
+        side,
+        direction: oppositeDir,
+        status: { $in: ['open', 'partially_filled'] },
+      })
+    ).sort(sort);
     if (!best && !isMarketMaker) {
-      try {
-        const { ensureQuotesForDoc } = require('./marketMakerQuotes');
-        await ensureQuotesForDoc(item, kind);
-        best = await findBest();
-      } catch (e) {
-        console.warn('orderbook mm top-up before market order:', e.message || e);
-      }
+      throw Object.assign(new Error('No active market orders on this side — try a limit order or wait for quotes'), {
+        statusCode: 400,
+        code: 'NO_LIQUIDITY',
+      });
     }
     if (!best) {
-      throw Object.assign(new Error('No active market orders on this side — try a limit order or wait for quotes'), {
+      throw Object.assign(new Error('No active market orders on this side'), {
         statusCode: 400,
         code: 'NO_LIQUIDITY',
       });
@@ -902,11 +927,33 @@ async function placeOrder(payload) {
   }
   await session.endSession();
 
-  if (ledgerApply) {
+  const bgLedgerApply = ledgerApply;
+  ledgerApply = null;
+
+  let out = await finalizeOrderStatus(createdId);
+
+  if (!isMarketMaker) {
+    setImmediate(() => {
+      runPostPlaceCompletion(createdId, item, kind, fees, orderKind, bgLedgerApply);
+    });
+    setImmediate(() => {
+      const { ensureQuotesForDoc } = require('./marketMakerQuotes');
+      ensureQuotesForDoc(item, kind).catch((e) => {
+        console.warn('orderbook mm/risk refresh after user order:', e.message || e);
+      });
+    });
+    return out;
+  }
+
+  if (bgLedgerApply) {
     try {
-      await applyLegsToOrderbookPositions(ledgerApply.chainMarketId, ledgerApply.legs, ledgerApply.contractLower);
+      await applyLegsToOrderbookPositions(
+        bgLedgerApply.chainMarketId,
+        bgLedgerApply.legs,
+        bgLedgerApply.contractLower
+      );
       await SettlementOutbox.updateOne(
-        { _id: ledgerApply.outId },
+        { _id: bgLedgerApply.outId },
         { $set: { positionsLedgerApplied: true, updatedAt: new Date() } }
       );
     } catch (e) {
@@ -918,57 +965,13 @@ async function placeOrder(payload) {
     }
   }
 
-  if (!isMarketMaker) {
-    setImmediate(() => {
-      const { ensureQuotesForDoc } = require('./marketMakerQuotes');
-      ensureQuotesForDoc(item, kind).catch((e) => {
-        console.warn('orderbook mm/risk refresh after user order:', e.message || e);
-      });
-    });
-  }
-
-  const deferMarketCompletion = !isMarketMaker && orderKind === 'market';
-
-  const finalizeOrderStatus = async (orderId) => {
-    let doc = await Order.findById(orderId).lean();
-    if (!doc || doc.status !== 'pending') return doc;
-    const nextStatus =
-      Number(doc.sizeRemaining) <= 1e-9
-        ? 'filled'
-        : Number(doc.sizeFilled) > 1e-9
-          ? 'partially_filled'
-          : 'open';
-    await Order.updateOne({ _id: orderId }, { $set: { status: nextStatus } });
-    return Order.findById(orderId).lean();
-  };
-
-  let out = await finalizeOrderStatus(createdId);
-
-  if (deferMarketCompletion) {
-    const orderIdForBg = createdId;
-    setImmediate(() => {
-      (async () => {
-        try {
-          await tryCompleteUserOrderFill(orderIdForBg, item, kind, fees);
-          await processSettlementOutboxBatch(8);
-        } catch (e) {
-          console.error('deferred market order completion:', e.message || e);
-        }
-      })();
-    });
-    return out;
-  }
-
   try {
     await processSettlementOutboxBatch(8);
   } catch (err) {
     console.error('orderbook settlement batch:', err.message || err);
   }
 
-  if (
-    !isMarketMaker &&
-    (orderKind === 'market' || String(out?.status || '').toLowerCase() === 'partially_filled')
-  ) {
+  if (orderKind === 'market' || String(out?.status || '').toLowerCase() === 'partially_filled') {
     await tryCompleteUserOrderFill(createdId, item, kind, fees);
     out = await finalizeOrderStatus(createdId);
   }
