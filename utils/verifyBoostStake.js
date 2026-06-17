@@ -8,11 +8,27 @@ function iface() {
   return new ethers.Interface(getWeRgameAbiSync());
 }
 
+async function getReceiptWithRetry(provider, txHash, attempts = 4) {
+  const hash = String(txHash).trim();
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const receipt = await provider.getTransactionReceipt(hash);
+      if (receipt) return receipt;
+    } catch {
+      /* retry */
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+  return null;
+}
+
 /**
  * Verify a boost stake/add tx credited the claim pool on-chain (BoostStaked / BoostStakeAdded).
  * @returns {{ ok: true, netStakeUsdc: number, grossAmountUsdc: number } | { ok: false, reason: string }}
  */
-async function verifyBoostStakeTx({ txHash, marketId, walletAddress, outcome }) {
+async function verifyBoostStakeTx({ txHash, marketId, walletAddress, outcome, outcomes }) {
   const contractAddr = getContractAddress();
   if (!contractAddr) return { ok: false, reason: 'CONTRACT_ADDRESS not configured' };
   if (!txHash || !marketId || !walletAddress) return { ok: false, reason: 'Missing tx or market or wallet' };
@@ -25,12 +41,7 @@ async function verifyBoostStakeTx({ txHash, marketId, walletAddress, outcome }) 
   }
 
   const provider = getJsonRpcProvider();
-  let receipt;
-  try {
-    receipt = await provider.getTransactionReceipt(String(txHash).trim());
-  } catch (e) {
-    return { ok: false, reason: e.message || 'Failed to load receipt' };
-  }
+  const receipt = await getReceiptWithRetry(provider, txHash);
   if (!receipt || receipt.status !== 1) {
     return { ok: false, reason: 'Transaction not found or failed' };
   }
@@ -40,7 +51,16 @@ async function verifyBoostStakeTx({ txHash, marketId, walletAddress, outcome }) 
 
   const i = iface();
   const mid = BigInt(marketId);
-  const outcomeNorm = String(outcome || '').trim();
+  const variantList = Array.isArray(outcomes) && outcomes.length
+    ? outcomes
+    : [outcome];
+  const acceptedOutcomes = new Set();
+  for (const v of variantList) {
+    const s = String(v || '').trim();
+    if (!s) continue;
+    acceptedOutcomes.add(s);
+    acceptedOutcomes.add(s.toLowerCase());
+  }
   let netStakeWei = 0n;
   let matched = false;
 
@@ -53,16 +73,25 @@ async function verifyBoostStakeTx({ txHash, marketId, walletAddress, outcome }) 
       continue;
     }
     if (!parsed) continue;
-    if (parsed.name !== 'BoostStaked' && parsed.name !== 'BoostStakeAdded') continue;
+
     const logMarketId = parsed.args.marketId ?? parsed.args[0];
     const logUser = parsed.args.user ?? parsed.args[1];
-    const logOutcome = parsed.args.outcome ?? parsed.args[2];
-    const logNet = parsed.args.amount ?? parsed.args[3];
     if (BigInt(logMarketId) !== mid) continue;
     if (String(logUser).toLowerCase() !== wallet.toLowerCase()) continue;
-    if (String(logOutcome).trim() !== outcomeNorm) continue;
-    netStakeWei += BigInt(logNet);
-    matched = true;
+
+    if (parsed.name === 'BoostStaked') {
+      const logOutcome = String(parsed.args.outcome ?? parsed.args[2] ?? '').trim();
+      const logKey = logOutcome.toLowerCase();
+      if (!acceptedOutcomes.has(logOutcome) && !acceptedOutcomes.has(logKey)) continue;
+      const logNet = parsed.args.amount ?? parsed.args[3];
+      netStakeWei += BigInt(logNet);
+      matched = true;
+    } else if (parsed.name === 'BoostStakeAdded') {
+      // Contract emits BoostStakeAdded(marketId, user, amount) — no outcome in the event.
+      const logNet = parsed.args.amount ?? parsed.args[2];
+      netStakeWei += BigInt(logNet);
+      matched = true;
+    }
   }
 
   if (!matched) {

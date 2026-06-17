@@ -22,6 +22,7 @@ const {
   awardGoldenTickets,
   getGoldenTicketBoostRanges,
 } = require('../services/ticketService');
+const UserTransaction = require('../models/UserTransaction');
 
 const router = express.Router();
 
@@ -88,6 +89,37 @@ function normalizeMatchOutcome(outcome, teamA, teamB, drawEnabled = true) {
   return null;
 }
 
+/** Admin status only — not scheduled lockedTime. Boost/play until admin locks or resolves. */
+function isBoostStakeOpen(item) {
+  if (!item) return false;
+  if (item.isResolved === true) return false;
+  const s = String(item.status || '').toLowerCase().trim();
+  if (s === 'locked' || s === 'settled' || s === 'ended') return false;
+  return true;
+}
+
+function boostVerifyOutcome(prediction, item) {
+  let outcome = String(prediction?.outcome || '').trim();
+  if (!outcome || !item) return outcome;
+  if (prediction.match || item.teamA != null) {
+    const normalized = normalizeMatchOutcome(outcome, item.teamA, item.teamB, item.drawEnabled);
+    if (normalized) return normalized;
+  }
+  return outcome;
+}
+
+/** Build outcome strings accepted on-chain for tx verification. */
+function boostVerifyOutcomeVariants(prediction, item) {
+  const primary = boostVerifyOutcome(prediction, item);
+  const variants = new Set([primary, String(prediction?.outcome || '').trim()].filter(Boolean));
+  if (item?.teamA) variants.add(String(item.teamA).trim());
+  if (item?.teamB) variants.add(String(item.teamB).trim());
+  variants.add('TeamA');
+  variants.add('TeamB');
+  variants.add('Draw');
+  return [...variants];
+}
+
 // Get all predictions for authenticated user
 router.get('/user', auth, async (req, res) => {
   try {
@@ -129,8 +161,8 @@ router.post('/free', auth, async (req, res) => {
     if (item.freePredictionEnabled === false) {
       return res.status(400).json({ message: 'Free prediction is disabled for this event' });
     }
-    if (item.status === 'locked' || item.status === 'completed' || item.status === 'settled') {
-      return res.status(400).json({ message: 'Item is locked or completed' });
+    if (!isBoostStakeOpen(item)) {
+      return res.status(400).json({ message: 'Item is locked or ended' });
     }
 
     const minTickets = Math.max(1, parseInt(item.minFreeTickets, 10) || 1);
@@ -241,11 +273,8 @@ router.post('/free/:predictionId/add-tickets', auth, async (req, res) => {
     if (item.freePredictionEnabled === false) {
       return res.status(400).json({ message: 'Free prediction is disabled for this event' });
     }
-    if (item.status === 'locked' || item.status === 'completed' || item.status === 'settled') {
-      return res.status(400).json({ message: 'Predictions are locked or completed' });
-    }
-    if (item.status !== 'upcoming' && item.status !== 'active') {
-      return res.status(400).json({ message: 'Cannot add tickets while event is not open' });
+    if (!isBoostStakeOpen(item)) {
+      return res.status(400).json({ message: 'Predictions are locked or ended' });
     }
 
     const minTickets = Math.max(1, parseInt(item.minFreeTickets, 10) || 1);
@@ -303,11 +332,13 @@ router.post('/boost', auth, async (req, res) => {
       }
     }
 
-    if (item.status === 'locked' || item.status === 'completed' || item.status === 'settled') {
-      return res.status(400).json({ message: 'Item is locked or completed' });
+    if (item.status === 'locked' || item.status === 'settled' || item.status === 'ended') {
+      return res.status(400).json({ message: 'Item is locked or ended' });
+    }
+    if (item.isResolved) {
+      return res.status(400).json({ message: 'Item is resolved' });
     }
 
-    // Normalize outcome for matches to contract canonical form (TeamA, TeamB, Draw)
     let outcomeToStore = outcome;
     if (matchId && item.teamA != null && item.teamB != null) {
       const normalized = normalizeMatchOutcome(outcome, item.teamA, item.teamB, item.drawEnabled);
@@ -317,7 +348,6 @@ router.post('/boost', auth, async (req, res) => {
       outcomeToStore = normalized;
     }
 
-    // One boost position per user per event per outcome
     const query = {
       user: req.user._id,
       type: 'boost',
@@ -345,6 +375,7 @@ router.post('/boost', auth, async (req, res) => {
         marketId: item.marketId,
         walletAddress: linkedWallet,
         outcome: outcomeToStore,
+        outcomes: boostVerifyOutcomeVariants({ outcome: outcomeToStore }, item),
       });
       if (!verifiedStake.ok) {
         return res.status(400).json({ message: verifiedStake.reason || 'Invalid boost stake transaction' });
@@ -538,8 +569,8 @@ router.put('/:predictionId', auth, async (req, res) => {
     
     // Check if item is still upcoming
     const item = prediction.match || prediction.poll;
-    if (!item || (item.status !== 'upcoming' && item.status !== 'active')) {
-      return res.status(400).json({ message: 'Cannot update prediction. Item is not upcoming' });
+    if (!item || !isBoostStakeOpen(item)) {
+      return res.status(400).json({ message: 'Cannot update prediction. Item is not open' });
     }
 
     if (prediction.type === 'free') {
@@ -588,6 +619,103 @@ router.put('/:predictionId', auth, async (req, res) => {
   }
 });
 
+// Recover boost add-stake txs that succeeded on-chain but failed backend save
+router.post('/boost/reconcile-pending', auth, async (req, res) => {
+  try {
+    const linkedWallet = await assertWalletLinkedToUser({
+      userId: req.user._id,
+      walletAddress: req.body.walletAddress,
+    });
+    const pending = await UserTransaction.find({
+      user: req.user._id,
+      action: 'boost_add_stake',
+      txHash: { $exists: true, $nin: [null, ''] },
+      $or: [
+        { 'meta.stakeCreditedPredictionId': { $exists: false } },
+        { 'meta.stakeCreditedPredictionId': null },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(15);
+
+    const { verifyBoostStakeTx } = require('../utils/verifyBoostStake');
+    const fees = await getFees();
+    let reconciled = 0;
+
+    for (const row of pending) {
+      const itemId = row.itemId;
+      if (!itemId || !row.txHash) continue;
+
+      let item = await Match.findById(itemId);
+      if (!item) item = await Poll.findById(itemId);
+      if (!item?.marketId) continue;
+
+      const outcomeHint = row.meta?.outcome ? String(row.meta.outcome).trim() : '';
+      const predQuery = {
+        user: req.user._id,
+        type: 'boost',
+        $or: [{ match: itemId }, { poll: itemId }],
+      };
+      let prediction = outcomeHint
+        ? await Prediction.findOne({ ...predQuery, outcome: outcomeHint })
+        : null;
+      if (!prediction) prediction = await Prediction.findOne(predQuery);
+      if (!prediction) continue;
+
+      const txKey = String(row.txHash).trim().toLowerCase();
+      const escaped = txKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const already = await UserTransaction.findOne({
+        'meta.stakeCreditedPredictionId': String(prediction._id),
+        txHash: { $regex: new RegExp(`^${escaped}$`, 'i') },
+      });
+      if (already) continue;
+
+      const verified = await verifyBoostStakeTx({
+        txHash: row.txHash,
+        marketId: item.marketId,
+        walletAddress: linkedWallet,
+        outcome: boostVerifyOutcome(prediction, item),
+        outcomes: boostVerifyOutcomeVariants(prediction, item),
+      });
+      if (!verified.ok) continue;
+
+      const stakeAmount = Number(row.amount) || 0;
+      if (stakeAmount <= 0) continue;
+
+      const platformFeeAmount = (stakeAmount * fees.platformFee) / 100;
+      const jackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
+      const addNet =
+        verified.ok && Number.isFinite(verified.netStakeUsdc)
+          ? verified.netStakeUsdc
+          : stakeAmount - platformFeeAmount - jackpotFeeAmount;
+
+      prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + addNet;
+      prediction.amount = prediction.totalStake;
+      if (!prediction.walletAddress) prediction.walletAddress = linkedWallet;
+
+      item.boostPool = (item.boostPool || 0) + addNet;
+      item.freeJackpotPool = (item.freeJackpotPool || 0) + jackpotFeeAmount;
+      item.platformFees = (item.platformFees || 0) + platformFeeAmount;
+
+      await prediction.save();
+      await item.save();
+      await UserTransaction.updateMany(
+        {
+          user: req.user._id,
+          action: 'boost_add_stake',
+          txHash: { $regex: new RegExp(`^${escaped}$`, 'i') },
+        },
+        { $set: { 'meta.stakeCreditedPredictionId': String(prediction._id) } }
+      );
+      reconciled += 1;
+    }
+
+    res.json({ reconciled });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Boost: Add or withdraw stake
 router.post('/boost/:predictionId/stake', auth, async (req, res) => {
   try {
@@ -631,8 +759,8 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     
     // Check if item is still upcoming
     const item = prediction.match || prediction.poll;
-    if (!item || (item.status !== 'upcoming' && item.status !== 'active')) {
-      return res.status(400).json({ message: 'Cannot modify stake. Item is not upcoming' });
+    if (!item || !isBoostStakeOpen(item)) {
+      return res.status(400).json({ message: 'Cannot modify stake. Item is not open for predictions' });
     }
     
     const stakeAmount = parseFloat(amount);
@@ -643,6 +771,17 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     
     if (action === 'add') {
       let verifiedAdd = null;
+      const txKey = txHash ? String(txHash).trim().toLowerCase() : '';
+      if (txKey) {
+        const alreadyCredited = await UserTransaction.findOne({
+          user: req.user._id,
+          'meta.stakeCreditedPredictionId': String(prediction._id),
+          txHash: { $regex: new RegExp(`^${txKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        });
+        if (alreadyCredited) {
+          return res.json({ ...prediction.toObject(), goldenTicketsAwarded: 0, alreadyCredited: true });
+        }
+      }
       if (item.marketId != null) {
         if (!txHash || !String(txHash).trim()) {
           return res.status(400).json({
@@ -650,11 +789,13 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
           });
         }
         const { verifyBoostStakeTx } = require('../utils/verifyBoostStake');
+        const outcomeForVerify = boostVerifyOutcome(prediction, item);
         verifiedAdd = await verifyBoostStakeTx({
           txHash: String(txHash).trim(),
           marketId: item.marketId,
           walletAddress: linkedWallet,
-          outcome: prediction.outcome,
+          outcome: outcomeForVerify,
+          outcomes: boostVerifyOutcomeVariants(prediction, item),
         });
         if (!verifiedAdd.ok) {
           return res.status(400).json({ message: verifiedAdd.reason || 'Invalid boost stake transaction' });
@@ -717,6 +858,19 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     prediction.updatedAt = new Date();
     await prediction.save();
     await item.save();
+
+    if (txHash) {
+      const txKey = String(txHash).trim().toLowerCase();
+      const txAction = action === 'add' ? 'boost_add_stake' : 'boost_withdraw_stake';
+      await UserTransaction.updateMany(
+        {
+          user: req.user._id,
+          action: txAction,
+          txHash: { $regex: new RegExp(`^${txKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        },
+        { $set: { 'meta.stakeCreditedPredictionId': String(prediction._id) } }
+      );
+    }
 
     res.json({
       ...prediction.toObject(),

@@ -717,7 +717,10 @@ async function placeOrder(payload) {
       }
     }
     if (!best) {
-      throw Object.assign(new Error('No liquidity to match market order'), { statusCode: 400 });
+      throw Object.assign(new Error('No active market orders on this side — try a limit order or wait for quotes'), {
+        statusCode: 400,
+        code: 'NO_LIQUIDITY',
+      });
     }
     const obSlipBps = Math.max(
       Number(slippageBps) || 100,
@@ -924,22 +927,42 @@ async function placeOrder(payload) {
     });
   }
 
+  const deferMarketCompletion = !isMarketMaker && orderKind === 'market';
+
+  const finalizeOrderStatus = async (orderId) => {
+    let doc = await Order.findById(orderId).lean();
+    if (!doc || doc.status !== 'pending') return doc;
+    const nextStatus =
+      Number(doc.sizeRemaining) <= 1e-9
+        ? 'filled'
+        : Number(doc.sizeFilled) > 1e-9
+          ? 'partially_filled'
+          : 'open';
+    await Order.updateOne({ _id: orderId }, { $set: { status: nextStatus } });
+    return Order.findById(orderId).lean();
+  };
+
+  let out = await finalizeOrderStatus(createdId);
+
+  if (deferMarketCompletion) {
+    const orderIdForBg = createdId;
+    setImmediate(() => {
+      (async () => {
+        try {
+          await tryCompleteUserOrderFill(orderIdForBg, item, kind, fees);
+          await processSettlementOutboxBatch(8);
+        } catch (e) {
+          console.error('deferred market order completion:', e.message || e);
+        }
+      })();
+    });
+    return out;
+  }
+
   try {
     await processSettlementOutboxBatch(8);
   } catch (err) {
     console.error('orderbook settlement batch:', err.message || err);
-  }
-
-  let out = await Order.findById(createdId).lean();
-  if (out && out.status === 'pending') {
-    const nextStatus =
-      Number(out.sizeRemaining) <= 1e-9
-        ? 'filled'
-        : Number(out.sizeFilled) > 1e-9
-          ? 'partially_filled'
-          : 'open';
-    await Order.updateOne({ _id: createdId }, { $set: { status: nextStatus } });
-    out = await Order.findById(createdId).lean();
   }
 
   if (
@@ -947,17 +970,7 @@ async function placeOrder(payload) {
     (orderKind === 'market' || String(out?.status || '').toLowerCase() === 'partially_filled')
   ) {
     await tryCompleteUserOrderFill(createdId, item, kind, fees);
-    out = await Order.findById(createdId).lean();
-    if (out && out.status === 'pending') {
-      const nextStatus =
-        Number(out.sizeRemaining) <= 1e-9
-          ? 'filled'
-          : Number(out.sizeFilled) > 1e-9
-            ? 'partially_filled'
-            : 'open';
-      await Order.updateOne({ _id: createdId }, { $set: { status: nextStatus } });
-      out = await Order.findById(createdId).lean();
-    }
+    out = await finalizeOrderStatus(createdId);
   }
 
   return out;
