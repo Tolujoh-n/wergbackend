@@ -1,6 +1,6 @@
 const express = require('express');
 const { ethers } = require('ethers');
-const { getContractAddress, getChainId, getJsonRpcProvider, getUsdcAddress } = require('../utils/chainConfig');
+const { getContractAddress, getChainId, getJsonRpcProvider, getJsonRpcProviderFallback, getUsdcAddress } = require('../utils/chainConfig');
 const { getClaimSignerAddress } = require('../utils/claimAuth');
 const { getWeRgameAbiSync } = require('../utils/wergameContractAbi');
 
@@ -38,6 +38,9 @@ router.get('/blockchain', (req, res) => {
   });
 });
 
+const usdcStateCache = new Map();
+const USDC_STATE_CACHE_MS = 15000;
+
 /** USDC balance + allowance for a wallet (server RPC — avoids browser SSL/RPC issues). */
 router.get('/blockchain/usdc-state', async (req, res) => {
   try {
@@ -49,6 +52,12 @@ router.get('/blockchain/usdc-state', async (req, res) => {
       return res.status(503).json({ ok: false, message: 'CONTRACT_ADDRESS or USDC_ADDRESS not configured' });
     }
     const spender = checksumOrNull(req.query.spender) || contractAddress;
+    const cacheKey = `${wallet}:${spender}`;
+    const hit = usdcStateCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < USDC_STATE_CACHE_MS) {
+      return res.json(hit.data);
+    }
+
     const provider = getJsonRpcProvider();
     const erc = new ethers.Contract(
       usdcAddress,
@@ -58,11 +67,29 @@ router.get('/blockchain/usdc-state', async (req, res) => {
       ],
       provider
     );
-    const [balance, allowance] = await Promise.all([
-      erc.balanceOf(wallet),
-      erc.allowance(wallet, spender),
-    ]);
-    res.json({
+    let balance;
+    let allowance;
+    try {
+      [balance, allowance] = await Promise.all([
+        erc.balanceOf(wallet),
+        erc.allowance(wallet, spender),
+      ]);
+    } catch (primaryErr) {
+      const fallback = getJsonRpcProviderFallback();
+      const ercFb = new ethers.Contract(
+        usdcAddress,
+        [
+          'function balanceOf(address) view returns (uint256)',
+          'function allowance(address owner, address spender) view returns (uint256)',
+        ],
+        fallback
+      );
+      [balance, allowance] = await Promise.all([
+        ercFb.balanceOf(wallet),
+        ercFb.allowance(wallet, spender),
+      ]);
+    }
+    const payload = {
       ok: true,
       wallet,
       spender,
@@ -72,7 +99,9 @@ router.get('/blockchain/usdc-state', async (req, res) => {
       allowanceWei: allowance.toString(),
       balanceUsdc: ethers.formatUnits(balance, 6),
       allowanceUsdc: ethers.formatUnits(allowance, 6),
-    });
+    };
+    usdcStateCache.set(cacheKey, { at: Date.now(), data: payload });
+    res.json(payload);
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message || 'USDC read failed' });
   }

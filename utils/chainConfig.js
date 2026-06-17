@@ -6,7 +6,16 @@ const BASE_MAINNET_RPC = 'https://mainnet.base.org';
 const BASE_MAINNET_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 function getRpcUrl() {
-  return process.env.BASE_RPC_URL || process.env.BASE_RPC || BASE_MAINNET_RPC;
+  return (
+    process.env.BASE_RPC_URL ||
+    process.env.BASE_RPC ||
+    process.env.REACT_APP_RPC_URL ||
+    BASE_MAINNET_RPC
+  );
+}
+
+function getRpcFallbackUrl() {
+  return process.env.BASE_RPC_URL_FALLBACK || 'https://base-rpc.publicnode.com';
 }
 
 function getChainId() {
@@ -42,8 +51,21 @@ function getBlockExplorerBase() {
  * Single JsonRpcProvider for server-side reads/sends. Uses CHAIN_ID + staticNetwork
  * so ethers does not depend on a separate eth_chainId "network detect" round-trip.
  */
+let cachedProvider = null;
+let cachedProviderUrl = null;
+
 function getJsonRpcProvider() {
   const url = getRpcUrl();
+  const chainId = getChainId();
+  if (cachedProvider && cachedProviderUrl === url) return cachedProvider;
+  cachedProvider = new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
+  cachedProviderUrl = url;
+  return cachedProvider;
+}
+
+/** Fallback provider when primary RPC is rate-limited. */
+function getJsonRpcProviderFallback() {
+  const url = getRpcFallbackUrl();
   const chainId = getChainId();
   return new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
 }
@@ -58,4 +80,5 @@ module.exports = {
   getContractAddress,
   getBlockExplorerBase,
   getJsonRpcProvider,
+  getJsonRpcProviderFallback,
 };
