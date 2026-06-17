@@ -1,24 +1,35 @@
 const sgMail = require('@sendgrid/mail');
 
+function envValue(key) {
+  const raw = process.env[key];
+  if (raw == null || raw === '') return '';
+  return String(raw).trim().replace(/^["']|["']$/g, '');
+}
+
 function isDevEmailOtpLogEnabled() {
   return (
-    process.env.EMAIL_VERIFY_DEV_LOG === 'true' || process.env.PASSWORD_RESET_DEV_LOG === 'true'
+    envValue('EMAIL_VERIFY_DEV_LOG') === 'true' || envValue('PASSWORD_RESET_DEV_LOG') === 'true'
   );
 }
 
 function isSendgridConfigured() {
-  return !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL);
+  return !!(envValue('SENDGRID_API_KEY') && envValue('SENDGRID_FROM_EMAIL'));
 }
 
-/** Send via SendGrid only when configured and dev console logging is off. */
+/** Use SendGrid whenever API key + from address are set. */
 function shouldSendViaSendgrid() {
-  return isSendgridConfigured() && !isDevEmailOtpLogEnabled();
+  return isSendgridConfigured();
+}
+
+/** Console OTP only when SendGrid is missing and dev logging is on. */
+function shouldLogDevOtpToConsole() {
+  return !isSendgridConfigured() && isDevEmailOtpLogEnabled();
 }
 
 function logDevEmailOtp(label, email, code, minutesValid = 10) {
   const line = '='.repeat(52);
   console.log(`\n${line}`);
-  console.log(`[${label}] DEV — OTP (SendGrid skipped)`);
+  console.log(`[${label}] DEV — OTP (SendGrid not configured)`);
   console.log(`  Email:   ${email}`);
   console.log(`  Code:    ${code}`);
   console.log(`  Expires: ${minutesValid} minute(s)`);
@@ -26,7 +37,7 @@ function logDevEmailOtp(label, email, code, minutesValid = 10) {
 }
 
 function getSendgridConfigured() {
-  const apiKey = process.env.SENDGRID_API_KEY;
+  const apiKey = envValue('SENDGRID_API_KEY');
   if (!apiKey) {
     throw new Error('SENDGRID_API_KEY is not set');
   }
@@ -34,37 +45,46 @@ function getSendgridConfigured() {
   return sgMail;
 }
 
-function getSendgridFromEmail() {
-  const from = process.env.SENDGRID_FROM_EMAIL;
-  if (!from) {
+function parseFromAddress() {
+  const email = envValue('SENDGRID_FROM_EMAIL');
+  if (!email) {
     throw new Error('SENDGRID_FROM_EMAIL is not set');
   }
-  return from;
+  if (email.includes('<') && email.includes('>')) {
+    return email;
+  }
+  const name = envValue('SENDGRID_FROM_NAME') || envValue('APP_NAME') || 'WeRgame';
+  return { email, name };
 }
 
-/**
- * Send a 6-digit password reset code to the user's email.
- */
-async function sendPasswordResetEmail({ to, code, minutesValid, appName }) {
-  const sg = getSendgridConfigured();
-  const from = getSendgridFromEmail();
-  const product = appName || process.env.APP_NAME || 'WeRgame';
-  const minutes = minutesValid || 10;
+function formatSendgridError(err) {
+  const errors = err?.response?.body?.errors;
+  if (Array.isArray(errors) && errors.length) {
+    return errors.map((e) => e.message).filter(Boolean).join('; ');
+  }
+  return err?.message || 'SendGrid request failed';
+}
 
-  await sg.send({
-    to,
-    from,
-    subject: `${product} — Password reset code`,
-    text: `${product}: Your password reset code is ${code}. It expires in ${minutes} minutes. Do not share this code. If you did not request a password reset, ignore this email.`,
-    html: buildOtpEmailHtml({
-      product,
-      title: 'Reset your password',
-      subtitle: 'Use this one-time code to reset your password.',
-      code,
-      minutes,
-      footerNote: 'If you did not request a password reset, you can safely ignore this email.',
-    }),
-  });
+async function deliverSendgridMessage(msg) {
+  const sg = getSendgridConfigured();
+  try {
+    const [response] = await sg.send(msg);
+    const statusCode = response?.statusCode || 202;
+    if (statusCode >= 400) {
+      const err = new Error(`SendGrid rejected the email (HTTP ${statusCode})`);
+      err.statusCode = 502;
+      throw err;
+    }
+    return { statusCode, messageId: response?.headers?.['x-message-id'] || null };
+  } catch (err) {
+    const detail = formatSendgridError(err);
+    const wrapped = new Error(
+      detail.includes('SendGrid') ? detail : `Failed to send email via SendGrid: ${detail}`
+    );
+    wrapped.statusCode = 502;
+    wrapped.cause = err;
+    throw wrapped;
+  }
 }
 
 function buildOtpEmailHtml({ product, title, subtitle, code, minutes, footerNote }) {
@@ -107,15 +127,41 @@ function buildOtpEmailHtml({ product, title, subtitle, code, minutes, footerNote
 }
 
 /**
+ * Send a 6-digit password reset code to the user's email.
+ */
+async function sendPasswordResetEmail({ to, code, minutesValid, appName }) {
+  const from = parseFromAddress();
+  const product = appName || envValue('APP_NAME') || 'WeRgame';
+  const minutes = minutesValid || 10;
+
+  const delivery = await deliverSendgridMessage({
+    to,
+    from,
+    subject: `${product} — Password reset code`,
+    text: `${product}: Your password reset code is ${code}. It expires in ${minutes} minutes. Do not share this code. If you did not request a password reset, ignore this email.`,
+    html: buildOtpEmailHtml({
+      product,
+      title: 'Reset your password',
+      subtitle: 'Use this one-time code to reset your password.',
+      code,
+      minutes,
+      footerNote: 'If you did not request a password reset, you can safely ignore this email.',
+    }),
+  });
+
+  console.log('[sendgrid] password reset OTP accepted for', to, 'status', delivery.statusCode);
+  return delivery;
+}
+
+/**
  * Send a 6-digit free-play verification code to the user's email.
  */
 async function sendFreePlayVerificationEmail({ to, code, minutesValid, appName, username, isReverify }) {
-  const sg = getSendgridConfigured();
-  const from = getSendgridFromEmail();
-  const product = appName || process.env.APP_NAME || 'WeRgame';
+  const from = parseFromAddress();
+  const product = appName || envValue('APP_NAME') || 'WeRgame';
   const minutes = minutesValid || 10;
   const greeting = username ? `Hi ${username},` : 'Hi there,';
-  const validDays = parseInt(process.env.EMAIL_VERIFY_VALID_DAYS || '30', 10);
+  const validDays = parseInt(envValue('EMAIL_VERIFY_VALID_DAYS') || '30', 10);
 
   const subject = isReverify
     ? `${product} — Re-verify your email for free predictions`
@@ -126,7 +172,7 @@ async function sendFreePlayVerificationEmail({ to, code, minutesValid, appName, 
     ? `${greeting}<br><br>Your free-play email verification has expired. Enter this code to continue placing <strong>free predictions</strong> for the next ${validDays} days.`
     : `${greeting}<br><br>Enter this code on ${product} to unlock <strong>free predictions</strong> for ${validDays} days.`;
 
-  await sg.send({
+  const delivery = await deliverSendgridMessage({
     to,
     from,
     subject,
@@ -140,15 +186,22 @@ async function sendFreePlayVerificationEmail({ to, code, minutesValid, appName, 
       footerNote: 'If you did not request this code, you can safely ignore this email.',
     }),
   });
+
+  console.log('[sendgrid] free-play OTP accepted for', to, 'status', delivery.statusCode);
+  return delivery;
 }
 
 module.exports = {
+  envValue,
   isSendgridConfigured,
   isDevEmailOtpLogEnabled,
   shouldSendViaSendgrid,
+  shouldLogDevOtpToConsole,
   logDevEmailOtp,
   getSendgridConfigured,
-  getSendgridFromEmail,
+  parseFromAddress,
+  formatSendgridError,
+  deliverSendgridMessage,
   sendPasswordResetEmail,
   sendFreePlayVerificationEmail,
   buildOtpEmailHtml,

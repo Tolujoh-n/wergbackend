@@ -6,11 +6,12 @@ const {
 } = require('../utils/emailVerification');
 const { assertAllowedEmail, normalizeEmail } = require('../utils/disposableEmail');
 const {
-  shouldSendViaSendgrid,
-  isDevEmailOtpLogEnabled,
-  logDevEmailOtp,
   sendFreePlayVerificationEmail,
 } = require('../utils/sendgrid');
+const {
+  assertOtpDeliveryConfigured,
+  deliverOtpCode,
+} = require('../utils/otpDelivery');
 
 const RESEND_SECONDS = () =>
   Math.max(30, parseInt(process.env.EMAIL_VERIFY_RESEND_SECONDS || '60', 10));
@@ -20,13 +21,7 @@ const VALID_DAYS = () => Math.max(1, parseInt(process.env.EMAIL_VERIFY_VALID_DAY
 const VALID_MS = () => VALID_DAYS() * 24 * 60 * 60 * 1000;
 
 function assertCanSendEmail() {
-  if (shouldSendViaSendgrid()) return;
-  if (isDevEmailOtpLogEnabled()) return;
-  const err = new Error(
-    'Email verification is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL on the server, or set EMAIL_VERIFY_DEV_LOG=true for local testing.'
-  );
-  err.statusCode = 503;
-  throw err;
+  assertOtpDeliveryConfigured();
 }
 
 function getEmailVerifiedAt(user) {
@@ -174,18 +169,32 @@ async function sendVerificationCode(userId, requestedEmail = null) {
   await user.save();
 
   try {
-    if (shouldSendViaSendgrid()) {
-      await sendFreePlayVerificationEmail({
-        to: targetEmail,
-        code,
-        minutesValid,
-        appName,
-        username: user.username,
-        isReverify,
-      });
-    } else {
-      logDevEmailOtp('emailVerify', targetEmail, code, minutesValid);
-    }
+    const delivery = await deliverOtpCode({
+      label: 'emailVerify',
+      email: targetEmail,
+      code,
+      minutesValid,
+      sendEmail: () =>
+        sendFreePlayVerificationEmail({
+          to: targetEmail,
+          code,
+          minutesValid,
+          appName,
+          username: user.username,
+          isReverify,
+        }),
+    });
+
+    return {
+      sent: delivery.sent,
+      channel: delivery.channel,
+      email: targetEmail,
+      emailMasked: maskEmail(targetEmail),
+      expiresInMinutes: minutesValid,
+      resendAfterSeconds: RESEND_SECONDS(),
+      isReverify,
+      dev: delivery.dev,
+    };
   } catch (e) {
     user.freePlayEmailVerification = {
       codeHash: null,
@@ -195,19 +204,10 @@ async function sendVerificationCode(userId, requestedEmail = null) {
       pendingEmail: null,
     };
     await user.save();
-    const err = new Error('Unable to send verification email. Please try again later.');
-    err.statusCode = 502;
+    const err = new Error(e.message || 'Unable to send verification email. Please try again later.');
+    err.statusCode = e.statusCode || 502;
     throw err;
   }
-
-  return {
-    email: targetEmail,
-    emailMasked: maskEmail(targetEmail),
-    expiresInMinutes: minutesValid,
-    resendAfterSeconds: RESEND_SECONDS(),
-    isReverify,
-    dev: isDevEmailOtpLogEnabled() || !shouldSendViaSendgrid(),
-  };
 }
 
 async function verifyEmailCode(userId, codeRaw) {

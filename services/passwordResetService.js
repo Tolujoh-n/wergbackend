@@ -3,7 +3,11 @@ const {
   hashResetCode,
   maskEmail,
 } = require('../utils/passwordReset');
-const { shouldSendViaSendgrid, isDevEmailOtpLogEnabled, logDevEmailOtp, sendPasswordResetEmail } = require('../utils/sendgrid');
+const { sendPasswordResetEmail } = require('../utils/sendgrid');
+const {
+  assertOtpDeliveryConfigured,
+  deliverOtpCode,
+} = require('../utils/otpDelivery');
 
 const TTL_MINUTES = () => parseInt(process.env.PASSWORD_RESET_CODE_TTL_MINUTES || '10', 10);
 const RESEND_SECONDS = () =>
@@ -18,17 +22,12 @@ const RESEND_SECONDS = () =>
   );
 
 function isDevPasswordReset() {
-  return isDevEmailOtpLogEnabled();
+  const { shouldLogDevOtpToConsole } = require('../utils/sendgrid');
+  return shouldLogDevOtpToConsole();
 }
 
 function assertCanSendPasswordResetEmail() {
-  if (shouldSendViaSendgrid()) return;
-  if (isDevPasswordReset()) return;
-  const err = new Error(
-    'Password reset email is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL on the server. For local dev, set PASSWORD_RESET_DEV_LOG=true.'
-  );
-  err.statusCode = 503;
-  throw err;
+  assertOtpDeliveryConfigured();
 }
 
 function enforceResendCooldown(user) {
@@ -72,6 +71,7 @@ async function sendPasswordResetCode(user) {
   const sentAt = new Date();
   const code = generateNumericCode();
 
+  const { shouldSendViaSendgrid } = require('../utils/sendgrid');
   user.passwordReset = {
     provider: shouldSendViaSendgrid() ? 'sendgrid' : 'local',
     codeHash: hashResetCode(code),
@@ -83,31 +83,35 @@ async function sendPasswordResetCode(user) {
   await user.save();
 
   try {
-    if (shouldSendViaSendgrid()) {
-      await sendPasswordResetEmail({
-        to: email,
-        code,
-        minutesValid,
-        appName: process.env.APP_NAME,
-      });
-    } else {
-      logDevEmailOtp('passwordReset', email, code, minutesValid);
-    }
+    const delivery = await deliverOtpCode({
+      label: 'passwordReset',
+      email,
+      code,
+      minutesValid,
+      sendEmail: () =>
+        sendPasswordResetEmail({
+          to: email,
+          code,
+          minutesValid,
+          appName: process.env.APP_NAME,
+        }),
+    });
+
+    return {
+      sent: delivery.sent,
+      channel: delivery.channel,
+      emailMasked: maskEmail(email),
+      expiresInMinutes: minutesValid,
+      resendAfterSeconds: RESEND_SECONDS(),
+      dev: delivery.dev,
+    };
   } catch (e) {
     clearPasswordReset(user);
     await user.save();
-    const err = new Error('Unable to send reset email. Please try again later.');
-    err.statusCode = 502;
+    const err = new Error(e.message || 'Unable to send reset email. Please try again later.');
+    err.statusCode = e.statusCode || 502;
     throw err;
   }
-
-  return {
-    sent: true,
-    emailMasked: maskEmail(email),
-    expiresInMinutes: minutesValid,
-    resendAfterSeconds: RESEND_SECONDS(),
-    dev: isDevPasswordReset() || !shouldSendViaSendgrid(),
-  };
 }
 
 function normalizeResetCode(codeRaw) {

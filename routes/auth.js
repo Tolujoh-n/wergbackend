@@ -231,19 +231,30 @@ router.post('/password-reset/request', async (req, res) => {
     }
 
     const user = await findUserByEmailCaseInsensitive(email);
-    let result = { sent: false };
-    if (user) {
-      result = await sendPasswordResetCode(user);
+    if (!user) {
+      return res.json({
+        sent: false,
+        message:
+          'If that email is registered with a password, we sent a verification code to your inbox.',
+      });
     }
 
-    const body = {
-      message: 'If that email is registered with a password, we sent a verification code to your inbox.',
-    };
-    if (result.sent && result.emailMasked) {
-      body.emailMasked = result.emailMasked;
+    const result = await sendPasswordResetCode(user);
+    const { buildPasswordResetSentMessage } = require('../utils/otpDelivery');
+    if (!result.sent) {
+      return res.status(502).json({
+        sent: false,
+        message: 'Unable to send password reset email. Please try again later.',
+      });
     }
 
-    return res.json(body);
+    return res.json({
+      sent: true,
+      channel: result.channel,
+      dev: result.dev,
+      emailMasked: result.emailMasked,
+      message: buildPasswordResetSentMessage(result),
+    });
   } catch (error) {
     const code = error.statusCode || 500;
     const body = { message: error.message || 'Unable to send reset email. Please try again later.' };
@@ -523,8 +534,20 @@ router.post('/email/send-code', auth, async (req, res) => {
   try {
     const requestedEmail = req.body.email != null ? String(req.body.email).trim() : null;
     const result = await sendVerificationCode(req.user._id, requestedEmail || undefined);
+    const { buildOtpSentMessage } = require('../utils/otpDelivery');
+
+    if (!result.sent) {
+      return res.status(502).json({
+        sent: false,
+        message: 'Unable to send verification email. Please try again later.',
+      });
+    }
+
     res.json({
-      message: 'Verification code sent to your email',
+      sent: true,
+      channel: result.channel,
+      dev: result.dev,
+      message: buildOtpSentMessage(result),
       ...result,
     });
   } catch (e) {
