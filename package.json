@@ -8,7 +8,9 @@
     "dev": "nodemon server.js",
     "seed": "node scripts/seedData.js",
     "seed:african-cup": "node scripts/seedAfricanCup2026.js",
-    "create:privileged-user": "node scripts/createPrivilegedUser.js"
+    "create:privileged-user": "node scripts/createPrivilegedUser.js",
+    "clear:leaderboard": "node scripts/clearLeaderboard.js",
+    "clear:streaks": "node scripts/clearStreaks.js"
   },
   "keywords": [],
   "author": "",
