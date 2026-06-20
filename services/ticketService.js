@@ -42,6 +42,47 @@ async function getGoldenTicketBoostRanges() {
   return Array.isArray(list) ? list : [];
 }
 
+const DEFAULT_GOLDEN_TICKET_BOOST_RATE = { tickets: 1, perUsdc: 10 };
+
+async function getGoldenTicketBoostRate() {
+  const s = await Settings.findOne({ key: 'goldenTicketBoostRate' }).lean();
+  const v = s?.value;
+  if (v && typeof v === 'object' && Number(v.perUsdc) > 0) {
+    return {
+      tickets: Math.max(0, parseInt(v.tickets, 10) || 1),
+      perUsdc: Math.max(0.01, Number(v.perUsdc) || DEFAULT_GOLDEN_TICKET_BOOST_RATE.perUsdc),
+    };
+  }
+  return { ...DEFAULT_GOLDEN_TICKET_BOOST_RATE };
+}
+
+function goldenTicketsForBoostAmount(rate, stakeUsdc) {
+  const amt = Number(stakeUsdc) || 0;
+  if (!(amt > 0)) return 0;
+  const cfg = rate && typeof rate === 'object' && !Array.isArray(rate) ? rate : null;
+  if (cfg && Number(cfg.perUsdc) > 0) {
+    const tickets = Number(cfg.tickets) || 1;
+    const perUsdc = Number(cfg.perUsdc) || 10;
+    if (tickets <= 0 || perUsdc <= 0) return 0;
+    return Math.round((amt / perUsdc) * tickets);
+  }
+  const ranges = Array.isArray(rate) ? rate : [];
+  if (!ranges.length) return 0;
+  for (const r of ranges) {
+    const min = Number(r.minUsdc) || 0;
+    const maxRaw = r.maxUsdc;
+    const max =
+      maxRaw == null || maxRaw === ''
+        ? Infinity
+        : Number.isFinite(Number(maxRaw))
+          ? Number(maxRaw)
+          : Infinity;
+    const tickets = parseInt(r.tickets, 10) || 0;
+    if (amt >= min && amt <= max) return tickets;
+  }
+  return 0;
+}
+
 async function resetDailyTicketsIfNeeded(user) {
   const today = startOfUtcDay();
   const last = user.lastTicketDate ? startOfUtcDay(new Date(user.lastTicketDate)) : null;
@@ -369,24 +410,6 @@ async function deductTickets(userId, amount) {
   return { fromNormal, fromGolden };
 }
 
-function goldenTicketsForBoostAmount(ranges, stakeUsdc) {
-  const amt = Number(stakeUsdc) || 0;
-  if (amt <= 0 || !ranges?.length) return 0;
-  for (const r of ranges) {
-    const min = Number(r.minUsdc) || 0;
-    const maxRaw = r.maxUsdc;
-    const max =
-      maxRaw == null || maxRaw === ''
-        ? Infinity
-        : Number.isFinite(Number(maxRaw))
-          ? Number(maxRaw)
-          : Infinity;
-    const tickets = parseInt(r.tickets, 10) || 0;
-    if (amt >= min && amt <= max) return tickets;
-  }
-  return 0;
-}
-
 async function awardGoldenTickets(userId, count) {
   if (!count || count <= 0) return;
   await User.findByIdAndUpdate(userId, { $inc: { goldenTickets: count } });
@@ -397,6 +420,7 @@ module.exports = {
   getNftTicketBonuses,
   getNftBonusesConfigRows,
   getGoldenTicketBoostRanges,
+  getGoldenTicketBoostRate,
   getTicketBalances,
   deductTickets,
   goldenTicketsForBoostAmount,

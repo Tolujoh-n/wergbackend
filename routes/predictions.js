@@ -20,7 +20,7 @@ const {
   deductTickets,
   goldenTicketsForBoostAmount,
   awardGoldenTickets,
-  getGoldenTicketBoostRanges,
+  getGoldenTicketBoostRate,
 } = require('../services/ticketService');
 const UserTransaction = require('../models/UserTransaction');
 
@@ -401,8 +401,8 @@ router.post('/boost', auth, async (req, res) => {
     const jackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
     const netStakeAmount = stakeAmount - platformFeeAmount - jackpotFeeAmount;
 
-    const ranges = await getGoldenTicketBoostRanges();
-    const goldenAward = goldenTicketsForBoostAmount(ranges, stakeAmount);
+    const rate = await getGoldenTicketBoostRate();
+    const goldenAward = goldenTicketsForBoostAmount(rate, stakeAmount);
     if (goldenAward > 0) await awardGoldenTickets(req.user._id, goldenAward);
     
     const stakeForDb =
@@ -806,8 +806,8 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
       const jackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
       const netStakeAmount = stakeAmount - platformFeeAmount - jackpotFeeAmount;
 
-      const ranges = await getGoldenTicketBoostRanges();
-      goldenTicketsAwarded = goldenTicketsForBoostAmount(ranges, stakeAmount);
+      const rate = await getGoldenTicketBoostRate();
+      goldenTicketsAwarded = goldenTicketsForBoostAmount(rate, stakeAmount);
       if (goldenTicketsAwarded > 0) await awardGoldenTickets(req.user._id, goldenTicketsAwarded);
 
       const addNet =

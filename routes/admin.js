@@ -1540,6 +1540,36 @@ router.post('/settings/goldenTicketBoostRanges', async (req, res) => {
   }
 });
 
+router.get('/settings/goldenTicketBoostRate', async (req, res) => {
+  try {
+    const { getGoldenTicketBoostRate } = require('../services/ticketService');
+    const rate = await getGoldenTicketBoostRate();
+    res.json({ rate });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/goldenTicketBoostRate', async (req, res) => {
+  try {
+    const tickets = Math.max(0, parseInt(req.body.tickets, 10) || 1);
+    const perUsdc = Math.max(0.01, Number(req.body.perUsdc) || 10);
+    const rate = { tickets, perUsdc };
+    await Settings.findOneAndUpdate(
+      { key: 'goldenTicketBoostRate' },
+      {
+        key: 'goldenTicketBoostRate',
+        value: rate,
+        description: 'Golden tickets earned per USDC staked on boost (rounded to nearest whole)',
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ rate });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Settings Management (generic key — register AFTER specific /settings/* routes)
 router.get('/settings/:key', async (req, res) => {
   try {

@@ -5,6 +5,7 @@ const {
   getNftBonusesForUser,
   getNftBonusesConfigRows,
   getGoldenTicketBoostRanges,
+  getGoldenTicketBoostRate,
 } = require('../services/ticketService');
 
 const router = express.Router();
@@ -18,8 +19,13 @@ router.get('/balances', auth, async (req, res) => {
   try {
     const additionalWallets = parseOptionalWalletQuery(req);
     const balances = await getTicketBalances(req.user._id, { additionalWallets });
-    const goldenRanges = await getGoldenTicketBoostRanges();
-    res.json({ ...balances, goldenTicketBoostRanges: goldenRanges, walletChecked: additionalWallets[0] || null });
+    const goldenRate = await getGoldenTicketBoostRate();
+    res.json({
+      ...balances,
+      goldenTicketBoostRate: goldenRate,
+      goldenTicketBoostRanges: [],
+      walletChecked: additionalWallets[0] || null,
+    });
   } catch (e) {
     res.status(e.statusCode || 500).json({ message: e.message });
   }
@@ -53,10 +59,11 @@ router.get('/verify-holdings', auth, async (req, res) => {
   try {
     const additionalWallets = parseOptionalWalletQuery(req);
     const balances = await getTicketBalances(req.user._id, { additionalWallets, forceVerify: true });
-    const goldenRanges = await getGoldenTicketBoostRanges();
+    const goldenRate = await getGoldenTicketBoostRate();
     res.json({
       ...balances,
-      goldenTicketBoostRanges: goldenRanges,
+      goldenTicketBoostRate: goldenRate,
+      goldenTicketBoostRanges: [],
       walletChecked: additionalWallets[0] || null,
     });
   } catch (e) {
