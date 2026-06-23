@@ -827,6 +827,7 @@ router.post('/polls', async (req, res) => {
       isFeatured,
       isSponsored,
       sponsoredImages,
+      date,
       lockedTime,
       optionType,
       options,
@@ -854,6 +855,7 @@ router.post('/polls', async (req, res) => {
       type,
       cup: cupDoc._id,
       stage: stageDoc?._id,
+      date: date && String(date).trim() !== '' ? new Date(date) : undefined,
       marketId: marketId ? parseInt(marketId, 10) : undefined,
       ...(orderbookContractAddressLower() ? { contractAddress: orderbookContractAddressLower() } : {}),
       minFreeTickets: Math.max(1, parseInt(minFreeTickets, 10) || 1),
@@ -919,7 +921,12 @@ router.post('/polls', async (req, res) => {
 // Update Poll
 router.put('/polls/:id', async (req, res) => {
   try {
-    const poll = await Poll.findByIdAndUpdate(req.params.id, req.body, {
+    const updates = { ...req.body };
+    if (updates.date !== undefined) {
+      updates.date =
+        updates.date && String(updates.date).trim() !== '' ? new Date(updates.date) : null;
+    }
+    const poll = await Poll.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
     });

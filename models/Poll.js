@@ -118,6 +118,10 @@ const pollSchema = new mongoose.Schema({
   sponsoredImages: [{
     type: String,
   }],
+  /** Scheduled event date/time (displayed to users in GMT). */
+  date: {
+    type: Date,
+  },
   lockedTime: {
     type: Date,
   },
