@@ -61,6 +61,24 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  /** Login / free / boost engagement streaks (current + best per type). */
+  engagementStreaks: {
+    login: {
+      current: { type: Number, default: 0 },
+      best: { type: Number, default: 0 },
+      lastDay: { type: String, default: null },
+    },
+    free: {
+      current: { type: Number, default: 0 },
+      best: { type: Number, default: 0 },
+      lastDay: { type: String, default: null },
+    },
+    boost: {
+      current: { type: Number, default: 0 },
+      best: { type: Number, default: 0 },
+      lastDay: { type: String, default: null },
+    },
+  },
   totalPredictions: {
     type: Number,
     default: 0,

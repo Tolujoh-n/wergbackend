@@ -17,9 +17,9 @@ router.get('/get-fees', async (req, res) => {
     
     res.json({
       platformFee: await getFee('platformFee', 10),
-      boostJackpotFee: await getFee('boostJackpotFee', 5),
-      marketPlatformFee: await getFee('marketPlatformFee', 5),
       freeJackpotFee: await getFee('freeJackpotFee', 5),
+      marketPlatformFee: await getFee('marketPlatformFee', 5),
+      boostJackpotFee: await getFee('freeJackpotFee', 5),
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -97,20 +97,30 @@ router.get('/transactions', async (req, res) => {
 // Set fees
 router.post('/set-fees', async (req, res) => {
   try {
-    const { platformFee, boostJackpotFee, marketPlatformFee, freeJackpotFee } = req.body;
-    
-    // Validate fees are percentages (0-100)
+    const platformFee = parseFloat(req.body.platformFee);
+    const marketPlatformFee = parseFloat(req.body.marketPlatformFee);
+    const freeJackpotFee = parseFloat(req.body.freeJackpotFee);
+    // Boost on-chain uses boostJackpotFee — always mirror freeJackpotFee.
+    const boostJackpotFee = freeJackpotFee;
+
+    if (
+      !Number.isFinite(platformFee) ||
+      !Number.isFinite(marketPlatformFee) ||
+      !Number.isFinite(freeJackpotFee)
+    ) {
+      return res.status(400).json({ message: 'All fee fields are required' });
+    }
+
     if (platformFee < 0 || platformFee > 100 || boostJackpotFee < 0 || boostJackpotFee > 100 ||
         marketPlatformFee < 0 || marketPlatformFee > 100 || freeJackpotFee < 0 || freeJackpotFee > 100) {
       return res.status(400).json({ message: 'Fees must be between 0 and 100' });
     }
-    
-    // Store fees in Settings
+
     const feeSettings = [
       { key: 'platformFee', value: platformFee, description: 'Platform fee percentage for boost predictions' },
-      { key: 'boostJackpotFee', value: boostJackpotFee, description: 'Boost jackpot fee percentage' },
+      { key: 'boostJackpotFee', value: boostJackpotFee, description: 'On-chain boost jackpot fee (mirrors free jackpot fee)' },
       { key: 'marketPlatformFee', value: marketPlatformFee, description: 'Platform fee percentage for market predictions' },
-      { key: 'freeJackpotFee', value: freeJackpotFee, description: 'Free jackpot fee percentage for market predictions' },
+      { key: 'freeJackpotFee', value: freeJackpotFee, description: 'Free jackpot fee % on boost stakes and market orderbook trades' },
     ];
     
     for (const feeSetting of feeSettings) {

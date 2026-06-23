@@ -57,10 +57,15 @@ router.get('/', async (req, res) => {
       user.totalPredictions = predictions.length;
       user.correctPredictions = predictions.filter(p => p.status === 'won').length;
       
-      // Ensure streak is included from user model
-      if (!user.streak) {
-        user.streak = 0;
-      }
+      // Engagement streak (login + free + boost) with daily decay
+      const { applyDecay, utcDayKey } = require('../services/engagementStreakService');
+      const today = utcDayKey();
+      const e = user.engagementStreaks || {};
+      const login = applyDecay(e.login, today);
+      const free = applyDecay(e.free, today);
+      const boost = applyDecay(e.boost, today);
+      user.streak =
+        (login.current || 0) + (free.current || 0) + (boost.current || 0);
     }
     
     // Filter out users with no predictions
@@ -159,10 +164,15 @@ router.get('/cup/:cupSlug', async (req, res) => {
       user.totalPredictions = userPredictions.length;
       user.correctPredictions = userPredictions.filter(p => p.status === 'won').length;
       
-      // Ensure streak is included from user model
-      if (!user.streak) {
-        user.streak = 0;
-      }
+      // Engagement streak (login + free + boost) with daily decay
+      const { applyDecay, utcDayKey } = require('../services/engagementStreakService');
+      const today = utcDayKey();
+      const e = user.engagementStreaks || {};
+      const login = applyDecay(e.login, today);
+      const free = applyDecay(e.free, today);
+      const boost = applyDecay(e.boost, today);
+      user.streak =
+        (login.current || 0) + (free.current || 0) + (boost.current || 0);
     }
     
     // Filter out users with no predictions for this cup

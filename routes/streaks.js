@@ -1,170 +1,59 @@
 const express = require('express');
 const { auth } = require('../middleware/auth');
 const User = require('../models/User');
-const Prediction = require('../models/Prediction');
-const Match = require('../models/Match');
-const Poll = require('../models/Poll');
-const Cup = require('../models/Cup');
+const {
+  getEngagementStreakPayload,
+  applyDecay,
+  ensureEngagementStreaks,
+  syncTotalStreak,
+  utcDayKey,
+} = require('../services/engagementStreakService');
 
 const router = express.Router();
 
-/**
- * @param {{ status: string, createdAt?: Date }[]} predAsc - free predictions, oldest → newest
- */
-function computeFreeStreakMetrics(predAsc) {
-  let longestStreak = 0;
-  let run = 0;
-  for (const p of predAsc) {
-    if (p.status === 'won') {
-      run += 1;
-      longestStreak = Math.max(longestStreak, run);
-    } else if (p.status === 'lost') {
-      run = 0;
-    }
-  }
-  let currentStreak = 0;
-  for (let i = predAsc.length - 1; i >= 0; i--) {
-    const p = predAsc[i];
-    if (p.status === 'won') currentStreak += 1;
-    else break;
-  }
-  return { currentStreak, longestStreak };
-}
-
-// Get top streaks
+// Leaderboard helper: top users by total engagement streak
 router.get('/', async (req, res) => {
   try {
+    const today = utcDayKey();
     const users = await User.find()
-      .select('username email walletAddress streak correctPredictions totalPredictions points')
+      .select('username email walletAddress streak engagementStreaks correctPredictions totalPredictions points')
       .lean();
 
-    const usersWithStreaks = [];
-    for (const user of users) {
-      const preds = await Prediction.find({ user: user._id, type: 'free' })
-        .select('status createdAt')
-        .sort({ createdAt: 1 })
-        .lean();
+    const rows = users.map((u) => {
+      const e = u.engagementStreaks || {};
+      const login = applyDecay(e.login, today);
+      const free = applyDecay(e.free, today);
+      const boost = applyDecay(e.boost, today);
+      const currentStreak =
+        (login.current || 0) + (free.current || 0) + (boost.current || 0);
+      const longestStreak =
+        (login.best || 0) + (free.best || 0) + (boost.best || 0);
+      return {
+        ...u,
+        streak: currentStreak,
+        currentStreak,
+        longestStreak,
+      };
+    });
 
-      const { currentStreak, longestStreak } = computeFreeStreakMetrics(preds);
-      const correctPredictions = preds.filter((p) => p.status === 'won').length;
-
-      if (currentStreak > 0 || preds.length > 0) {
-        usersWithStreaks.push({
-          ...user,
-          streak: currentStreak,
-          currentStreak,
-          longestStreak,
-          correctPredictions,
-        });
-      }
-    }
-
-    usersWithStreaks.sort(
+    rows.sort(
       (a, b) =>
         (b.currentStreak || 0) - (a.currentStreak || 0) ||
-        (b.longestStreak || 0) - (a.longestStreak || 0) ||
-        (b.correctPredictions || 0) - (a.correctPredictions || 0)
+        (b.longestStreak || 0) - (a.longestStreak || 0)
     );
 
-    res.json(usersWithStreaks.slice(0, 50));
+    res.json(rows.filter((r) => (r.currentStreak || 0) > 0).slice(0, 50));
   } catch (error) {
     console.error('Streaks error:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
-// Get streaks for a specific cup
 router.get('/cup/:cupSlug', async (req, res) => {
-  try {
-    const { cupSlug } = req.params;
-
-    const cup = await Cup.findOne({ slug: cupSlug });
-    if (!cup) {
-      return res.status(404).json({ message: 'Cup not found' });
-    }
-
-    const matches = await Match.find({ cup: cup._id });
-    const polls = await Poll.find({ cup: cup._id });
-    const matchIds = matches.map((m) => m._id);
-    const pollIds = polls.map((p) => p._id);
-
-    const predictions = await Prediction.find({
-      $or: [{ match: { $in: matchIds } }, { poll: { $in: pollIds } }],
-      type: 'free',
-    })
-      .select('user status createdAt')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const userPredictions = {};
-    for (const prediction of predictions) {
-      const userId = prediction.user.toString();
-      if (!userPredictions[userId]) userPredictions[userId] = [];
-      userPredictions[userId].push(prediction);
-    }
-
-    const userIds = Object.keys(userPredictions);
-    if (userIds.length === 0) {
-      return res.json([]);
-    }
-
-    const globalPreds = await Prediction.find({
-      user: { $in: userIds },
-      type: 'free',
-    })
-      .select('user status createdAt')
-      .sort({ createdAt: 1 })
-      .lean();
-
-    const globalByUser = new Map();
-    for (const p of globalPreds) {
-      const id = String(p.user);
-      if (!globalByUser.has(id)) globalByUser.set(id, []);
-      globalByUser.get(id).push(p);
-    }
-
-    const users = await User.find({ _id: { $in: userIds } })
-      .select('username email walletAddress streak correctPredictions totalPredictions points')
-      .lean();
-
-    const result = [];
-    for (const uid of userIds) {
-      const cupAsc = (userPredictions[uid] || []).sort(
-        (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-      );
-      const cupMetrics = computeFreeStreakMetrics(cupAsc);
-      if (cupMetrics.currentStreak <= 0) continue;
-
-      const globalAsc = globalByUser.get(uid) || [];
-      const globalMetrics = computeFreeStreakMetrics(globalAsc);
-      const correctPredictions = globalAsc.filter((p) => p.status === 'won').length;
-
-      const u = users.find((x) => String(x._id) === uid);
-      if (!u) continue;
-
-      result.push({
-        ...u,
-        streak: cupMetrics.currentStreak,
-        currentStreak: cupMetrics.currentStreak,
-        longestStreak: globalMetrics.longestStreak,
-        correctPredictions,
-      });
-    }
-
-    result.sort(
-      (a, b) =>
-        (b.currentStreak || 0) - (a.currentStreak || 0) ||
-        (b.longestStreak || 0) - (a.longestStreak || 0) ||
-        (b.correctPredictions || 0) - (a.correctPredictions || 0)
-    );
-
-    res.json(result.slice(0, 50));
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+  res.json([]);
 });
 
-// Get user's streak
+// Current user's engagement streaks (login + free + boost)
 router.get('/user', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -172,26 +61,15 @@ router.get('/user', auth, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const preds = await Prediction.find({ user: user._id, type: 'free' })
-      .select('status createdAt')
-      .sort({ createdAt: 1 })
-      .lean();
+    ensureEngagementStreaks(user);
+    const today = utcDayKey();
+    user.engagementStreaks.login = applyDecay(user.engagementStreaks.login, today);
+    user.engagementStreaks.free = applyDecay(user.engagementStreaks.free, today);
+    user.engagementStreaks.boost = applyDecay(user.engagementStreaks.boost, today);
+    syncTotalStreak(user);
+    await user.save();
 
-    const { currentStreak, longestStreak } = computeFreeStreakMetrics(preds);
-    const correctPredictions = preds.filter((p) => p.status === 'won').length;
-
-    if (currentStreak > (user.streak || 0)) {
-      user.streak = currentStreak;
-      await user.save();
-    }
-
-    res.json({
-      currentStreak,
-      longestStreak,
-      bestStreak: longestStreak,
-      correctPredictions,
-      history: [],
-    });
+    res.json(getEngagementStreakPayload(user));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

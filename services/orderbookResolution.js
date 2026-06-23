@@ -26,9 +26,14 @@ function winningPositionKeys(optionKeys, winningOptionKey) {
  * @param {import('mongoose').Document} params.item - Match or Poll (resolved)
  * @param {'match'|'poll'} params.kind
  * @param {string} params.winningOptionKey - TeamA | TeamB | Draw | poll option text
- * @param {number} params.totalMarketLiquidity - pool to split among winning shares
  */
-async function createOrderbookResolutionPredictions({ item, kind, winningOptionKey, totalMarketLiquidity }) {
+function roundPayoutUsdc(shares) {
+  const s = Number(shares) || 0;
+  if (!(s > 0)) return 0;
+  return Math.round(s * 100) / 100;
+}
+
+async function createOrderbookResolutionPredictions({ item, kind, winningOptionKey }) {
   const marketId = item.marketId;
   if (marketId == null) return;
 
@@ -52,17 +57,13 @@ async function createOrderbookResolutionPredictions({ item, kind, winningOptionK
     })
   ).lean();
 
-  const orderbookCollateral = positions.reduce((s, p) => s + (Number(p.totalInvested) || 0), 0);
-  const poolUsd = (Number(totalMarketLiquidity) || 0) + orderbookCollateral;
-
   const winners = positions.filter((p) => winKeys.has(p.positionKey));
-  const totalWinningShares = winners.reduce((s, p) => s + (p.shares || 0), 0);
-  if (totalWinningShares <= 0 || !(poolUsd > 0)) {
+  if (winners.length === 0) {
     return;
   }
 
   for (const pos of winners) {
-    const payout = (pos.shares / totalWinningShares) * poolUsd;
+    const payout = roundPayoutUsdc(pos.shares);
     if (!(payout > 0)) continue;
 
     const wallet = pos.walletAddress;

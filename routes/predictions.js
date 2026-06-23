@@ -23,6 +23,12 @@ const {
   getGoldenTicketBoostRate,
 } = require('../services/ticketService');
 const UserTransaction = require('../models/UserTransaction');
+const {
+  splitBoostStakeGross,
+  applyBoostStakeToEvent,
+  validateVerifiedBoostNet,
+  txHashRegex,
+} = require('../utils/boostFees');
 
 const router = express.Router();
 
@@ -63,10 +69,28 @@ async function getFees() {
   
   return {
     platformFee: await getFee('platformFee', 10),
-    boostJackpotFee: await getFee('boostJackpotFee', await getFee('freeJackpotFee', 5)),
-    marketPlatformFee: await getFee('marketPlatformFee', 5),
     freeJackpotFee: await getFee('freeJackpotFee', 5),
+    marketPlatformFee: await getFee('marketPlatformFee', 5),
+    boostJackpotFee: await getFee('freeJackpotFee', 5),
   };
+}
+
+async function markBoostTransactionCredited({ userId, txHash, action, predictionId, split, netStake }) {
+  const pattern = txHashRegex(txHash);
+  if (!pattern || !predictionId) return;
+  await UserTransaction.updateMany(
+    { user: userId, action, txHash: { $regex: pattern } },
+    {
+      $set: {
+        'meta.boostTxCredited': true,
+        'meta.predictionCreditedId': String(predictionId),
+        'meta.stakeCreditedPredictionId': String(predictionId),
+        'meta.creditedNetStake': netStake,
+        'meta.creditedJackpotFee': split.jackpotFeeAmount,
+        'meta.creditedPlatformFee': split.platformFeeAmount,
+      },
+    }
+  );
 }
 
 /**
@@ -228,6 +252,8 @@ router.post('/free', auth, async (req, res) => {
 
     const user = await User.findById(req.user._id);
     user.totalPredictions += 1;
+    const { recordFreePredictionStreak } = require('../services/engagementStreakService');
+    recordFreePredictionStreak(user);
     await user.save();
 
     const remaining = await getTicketBalances(req.user._id);
@@ -380,6 +406,26 @@ router.post('/boost', auth, async (req, res) => {
       if (!verifiedStake.ok) {
         return res.status(400).json({ message: verifiedStake.reason || 'Invalid boost stake transaction' });
       }
+
+      const txPattern = txHashRegex(txHash);
+      if (txPattern) {
+        const credited = await UserTransaction.findOne({
+          user: req.user._id,
+          action: 'boost_stake',
+          txHash: { $regex: txPattern },
+          'meta.boostTxCredited': true,
+        }).lean();
+        if (credited?.meta?.predictionCreditedId) {
+          const existing = await Prediction.findById(credited.meta.predictionCreditedId);
+          if (existing) {
+            return res.status(201).json({
+              prediction: existing,
+              goldenTicketsAwarded: 0,
+              alreadyCredited: true,
+            });
+          }
+        }
+      }
     }
 
     const existingBoostPrediction = await Prediction.findOne(query);
@@ -392,23 +438,22 @@ router.post('/boost', auth, async (req, res) => {
       });
     }
 
-    // Get fees from settings
     const fees = await getFees();
     const stakeAmount = parseFloat(amount);
-    
-    // Calculate fees (percentages)
-    const platformFeeAmount = (stakeAmount * fees.platformFee) / 100;
-    const jackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
-    const netStakeAmount = stakeAmount - platformFeeAmount - jackpotFeeAmount;
+    const split = splitBoostStakeGross(stakeAmount, fees);
+
+    if (verifiedStake?.ok && Number.isFinite(verifiedStake.netStakeUsdc)) {
+      const netCheck = validateVerifiedBoostNet(split, verifiedStake.netStakeUsdc);
+      if (!netCheck.ok) {
+        return res.status(400).json({ message: netCheck.reason });
+      }
+    }
 
     const rate = await getGoldenTicketBoostRate();
     const goldenAward = goldenTicketsForBoostAmount(rate, stakeAmount);
     if (goldenAward > 0) await awardGoldenTickets(req.user._id, goldenAward);
-    
-    const stakeForDb =
-      verifiedStake?.ok && Number.isFinite(verifiedStake.netStakeUsdc)
-        ? verifiedStake.netStakeUsdc
-        : netStakeAmount;
+
+    const stakeForDb = split.netStakeAmount;
 
     const prediction = new Prediction({
       user: req.user._id,
@@ -423,14 +468,25 @@ router.post('/boost', auth, async (req, res) => {
 
     await prediction.save();
 
-    item.boostPool = (item.boostPool || 0) + stakeForDb;
-    item.freeJackpotPool = (item.freeJackpotPool || 0) + jackpotFeeAmount;
-    item.platformFees = (item.platformFees || 0) + platformFeeAmount;
+    applyBoostStakeToEvent(item, split);
     await item.save();
 
     const user = await User.findById(req.user._id);
     user.totalPredictions += 1;
+    const { recordBoostPredictionStreak } = require('../services/engagementStreakService');
+    recordBoostPredictionStreak(user);
     await user.save();
+
+    if (txHash && String(txHash).trim()) {
+      await markBoostTransactionCredited({
+        userId: req.user._id,
+        txHash: String(txHash).trim(),
+        action: 'boost_stake',
+        predictionId: prediction._id,
+        split,
+        netStake: stakeForDb,
+      });
+    }
 
     res.status(201).json({ prediction, goldenTicketsAwarded: goldenAward });
   } catch (error) {
@@ -619,7 +675,7 @@ router.put('/:predictionId', auth, async (req, res) => {
   }
 });
 
-// Recover boost add-stake txs that succeeded on-chain but failed backend save
+// Recover boost txs that succeeded on-chain but failed backend save (initial stake + add-stake)
 router.post('/boost/reconcile-pending', auth, async (req, res) => {
   try {
     const linkedWallet = await assertWalletLinkedToUser({
@@ -628,15 +684,12 @@ router.post('/boost/reconcile-pending', auth, async (req, res) => {
     });
     const pending = await UserTransaction.find({
       user: req.user._id,
-      action: 'boost_add_stake',
+      action: { $in: ['boost_stake', 'boost_add_stake'] },
       txHash: { $exists: true, $nin: [null, ''] },
-      $or: [
-        { 'meta.stakeCreditedPredictionId': { $exists: false } },
-        { 'meta.stakeCreditedPredictionId': null },
-      ],
+      'meta.boostTxCredited': { $ne: true },
     })
       .sort({ createdAt: -1 })
-      .limit(15);
+      .limit(20);
 
     const { verifyBoostStakeTx } = require('../utils/verifyBoostStake');
     const fees = await getFees();
@@ -647,8 +700,34 @@ router.post('/boost/reconcile-pending', auth, async (req, res) => {
       if (!itemId || !row.txHash) continue;
 
       let item = await Match.findById(itemId);
-      if (!item) item = await Poll.findById(itemId);
+      let isMatch = Boolean(item);
+      if (!item) {
+        item = await Poll.findById(itemId);
+        isMatch = false;
+      }
       if (!item?.marketId) continue;
+
+      const verified = await verifyBoostStakeTx({
+        txHash: row.txHash,
+        marketId: item.marketId,
+        walletAddress: linkedWallet,
+        outcome: row.meta?.outcome ? String(row.meta.outcome).trim() : '',
+        outcomes: boostVerifyOutcomeVariants(
+          { outcome: row.meta?.outcome ? String(row.meta.outcome).trim() : '' },
+          item
+        ),
+      });
+      if (!verified.ok) continue;
+
+      const stakeAmount = Number(row.amount) || 0;
+      if (stakeAmount <= 0) continue;
+
+      const split = splitBoostStakeGross(stakeAmount, fees);
+      if (verified.ok && Number.isFinite(verified.netStakeUsdc)) {
+        const netCheck = validateVerifiedBoostNet(split, verified.netStakeUsdc);
+        if (!netCheck.ok) continue;
+      }
+      const addNet = split.netStakeAmount;
 
       const outcomeHint = row.meta?.outcome ? String(row.meta.outcome).trim() : '';
       const predQuery = {
@@ -656,57 +735,56 @@ router.post('/boost/reconcile-pending', auth, async (req, res) => {
         type: 'boost',
         $or: [{ match: itemId }, { poll: itemId }],
       };
+
       let prediction = outcomeHint
         ? await Prediction.findOne({ ...predQuery, outcome: outcomeHint })
         : null;
       if (!prediction) prediction = await Prediction.findOne(predQuery);
-      if (!prediction) continue;
 
-      const txKey = String(row.txHash).trim().toLowerCase();
-      const escaped = txKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const already = await UserTransaction.findOne({
-        'meta.stakeCreditedPredictionId': String(prediction._id),
-        txHash: { $regex: new RegExp(`^${escaped}$`, 'i') },
-      });
-      if (already) continue;
+      if (row.action === 'boost_stake') {
+        if (!prediction) {
+          if (!outcomeHint) continue;
+          let outcomeToStore = outcomeHint;
+          if (isMatch && item.teamA != null && item.teamB != null) {
+            const normalized = normalizeMatchOutcome(outcomeHint, item.teamA, item.teamB, item.drawEnabled);
+            if (normalized) outcomeToStore = normalized;
+          }
+          prediction = new Prediction({
+            user: req.user._id,
+            match: isMatch ? itemId : undefined,
+            poll: isMatch ? undefined : itemId,
+            type: 'boost',
+            outcome: outcomeToStore,
+            walletAddress: linkedWallet,
+            amount: addNet,
+            totalStake: addNet,
+          });
+          await prediction.save();
+          const user = await User.findById(req.user._id);
+          user.totalPredictions += 1;
+          await user.save();
+        }
+      } else if (row.action === 'boost_add_stake') {
+        if (!prediction) continue;
+        prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + addNet;
+        prediction.amount = prediction.totalStake;
+        if (!prediction.walletAddress) prediction.walletAddress = linkedWallet;
+        await prediction.save();
+      } else {
+        continue;
+      }
 
-      const verified = await verifyBoostStakeTx({
-        txHash: row.txHash,
-        marketId: item.marketId,
-        walletAddress: linkedWallet,
-        outcome: boostVerifyOutcome(prediction, item),
-        outcomes: boostVerifyOutcomeVariants(prediction, item),
-      });
-      if (!verified.ok) continue;
-
-      const stakeAmount = Number(row.amount) || 0;
-      if (stakeAmount <= 0) continue;
-
-      const platformFeeAmount = (stakeAmount * fees.platformFee) / 100;
-      const jackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
-      const addNet =
-        verified.ok && Number.isFinite(verified.netStakeUsdc)
-          ? verified.netStakeUsdc
-          : stakeAmount - platformFeeAmount - jackpotFeeAmount;
-
-      prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + addNet;
-      prediction.amount = prediction.totalStake;
-      if (!prediction.walletAddress) prediction.walletAddress = linkedWallet;
-
-      item.boostPool = (item.boostPool || 0) + addNet;
-      item.freeJackpotPool = (item.freeJackpotPool || 0) + jackpotFeeAmount;
-      item.platformFees = (item.platformFees || 0) + platformFeeAmount;
-
-      await prediction.save();
+      applyBoostStakeToEvent(item, split);
       await item.save();
-      await UserTransaction.updateMany(
-        {
-          user: req.user._id,
-          action: 'boost_add_stake',
-          txHash: { $regex: new RegExp(`^${escaped}$`, 'i') },
-        },
-        { $set: { 'meta.stakeCreditedPredictionId': String(prediction._id) } }
-      );
+
+      await markBoostTransactionCredited({
+        userId: req.user._id,
+        txHash: row.txHash,
+        action: row.action,
+        predictionId: prediction._id,
+        split,
+        netStake: addNet,
+      });
       reconciled += 1;
     }
 
@@ -768,15 +846,18 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     // Get fees from settings
     const fees = await getFees();
     let goldenTicketsAwarded = 0;
+    let verifiedAdd = null;
+    let addStakeSplit = null;
+    let addNetStake = null;
     
     if (action === 'add') {
-      let verifiedAdd = null;
       const txKey = txHash ? String(txHash).trim().toLowerCase() : '';
       if (txKey) {
         const alreadyCredited = await UserTransaction.findOne({
           user: req.user._id,
-          'meta.stakeCreditedPredictionId': String(prediction._id),
-          txHash: { $regex: new RegExp(`^${txKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+          action: 'boost_add_stake',
+          txHash: { $regex: txHashRegex(txHash) },
+          'meta.boostTxCredited': true,
         });
         if (alreadyCredited) {
           return res.json({ ...prediction.toObject(), goldenTicketsAwarded: 0, alreadyCredited: true });
@@ -802,25 +883,24 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
         }
       }
 
-      const platformFeeAmount = (stakeAmount * fees.platformFee) / 100;
-      const jackpotFeeAmount = (stakeAmount * fees.boostJackpotFee) / 100;
-      const netStakeAmount = stakeAmount - platformFeeAmount - jackpotFeeAmount;
+      addStakeSplit = splitBoostStakeGross(stakeAmount, fees);
+      if (verifiedAdd?.ok && Number.isFinite(verifiedAdd.netStakeUsdc)) {
+        const netCheck = validateVerifiedBoostNet(addStakeSplit, verifiedAdd.netStakeUsdc);
+        if (!netCheck.ok) {
+          return res.status(400).json({ message: netCheck.reason });
+        }
+      }
 
       const rate = await getGoldenTicketBoostRate();
       goldenTicketsAwarded = goldenTicketsForBoostAmount(rate, stakeAmount);
       if (goldenTicketsAwarded > 0) await awardGoldenTickets(req.user._id, goldenTicketsAwarded);
 
-      const addNet =
-        verifiedAdd?.ok && Number.isFinite(verifiedAdd.netStakeUsdc)
-          ? verifiedAdd.netStakeUsdc
-          : netStakeAmount;
-      
-      prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + addNet;
+      addNetStake = addStakeSplit.netStakeAmount;
+
+      prediction.totalStake = (prediction.totalStake || prediction.amount || 0) + addNetStake;
       prediction.amount = prediction.totalStake;
-      
-      item.boostPool = (item.boostPool || 0) + addNet;
-      item.freeJackpotPool = (item.freeJackpotPool || 0) + jackpotFeeAmount;
-      item.platformFees = (item.platformFees || 0) + platformFeeAmount;
+
+      applyBoostStakeToEvent(item, addStakeSplit);
     } else if (action === 'withdraw') {
       if (item.marketId != null) {
         if (!txHash || !String(txHash).trim()) {
@@ -859,17 +939,23 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
     await prediction.save();
     await item.save();
 
-    if (txHash) {
-      const txKey = String(txHash).trim().toLowerCase();
-      const txAction = action === 'add' ? 'boost_add_stake' : 'boost_withdraw_stake';
-      await UserTransaction.updateMany(
-        {
-          user: req.user._id,
-          action: txAction,
-          txHash: { $regex: new RegExp(`^${txKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-        },
-        { $set: { 'meta.stakeCreditedPredictionId': String(prediction._id) } }
-      );
+    if (txHash && action === 'add' && addStakeSplit) {
+      await markBoostTransactionCredited({
+        userId: req.user._id,
+        txHash,
+        action: 'boost_add_stake',
+        predictionId: prediction._id,
+        split: addStakeSplit,
+        netStake: addNetStake ?? addStakeSplit.netStakeAmount,
+      });
+    } else if (txHash && action === 'withdraw') {
+      const pattern = txHashRegex(txHash);
+      if (pattern) {
+        await UserTransaction.updateMany(
+          { user: req.user._id, action: 'boost_withdraw_stake', txHash: { $regex: pattern } },
+          { $set: { 'meta.stakeCreditedPredictionId': String(prediction._id) } }
+        );
+      }
     }
 
     res.json({

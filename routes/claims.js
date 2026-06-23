@@ -60,9 +60,7 @@ router.post('/:predictionId', auth, async (req, res) => {
     const pointsPerWin = await getPointsPerWin();
     
     if (prediction.type === 'free') {
-      user.points = (user.points || 0) + pointsPerWin; // Award points for correct free prediction
-      // Update streak
-      user.streak = (user.streak || 0) + 1;
+      user.points = (user.points || 0) + pointsPerWin;
       user.correctPredictions = (user.correctPredictions || 0) + 1;
     } else if (prediction.type === 'boost' || prediction.type === 'market') {
       // In real implementation, transfer ETH here

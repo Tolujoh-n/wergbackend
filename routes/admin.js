@@ -685,15 +685,13 @@ router.post('/matches/:id/resolve', async (req, res) => {
       }
     }
 
-    // Calculate market payouts: distribute total liquidity proportionally to winners
+    // Winning market shares pay $1 USDC each at resolution
     if (marketWinningPredictions.length > 0) {
-      const totalWinningShares = marketWinningPredictions.reduce((sum, p) => sum + (p.shares || 0), 0);
-      if (totalWinningShares > 0) {
-        for (const prediction of marketWinningPredictions) {
-          prediction.payout = (prediction.shares / totalWinningShares) * totalMarketLiquidity;
-          prediction.status = 'settled';
-          await prediction.save();
-        }
+      for (const prediction of marketWinningPredictions) {
+        const shares = Number(prediction.shares) || 0;
+        prediction.payout = shares > 0 ? Math.round(shares * 100) / 100 : 0;
+        prediction.status = 'settled';
+        await prediction.save();
       }
     }
 
@@ -1163,15 +1161,13 @@ router.post('/polls/:id/resolve', async (req, res) => {
       }
     }
 
-    // Calculate market payouts: distribute total liquidity proportionally to winners
+    // Winning market shares pay $1 USDC each at resolution
     if (marketWinningPredictions.length > 0) {
-      const totalWinningShares = marketWinningPredictions.reduce((sum, p) => sum + (p.shares || 0), 0);
-      if (totalWinningShares > 0) {
-        for (const prediction of marketWinningPredictions) {
-          prediction.payout = (prediction.shares / totalWinningShares) * totalMarketLiquidity;
-          prediction.status = 'settled';
-          await prediction.save();
-        }
+      for (const prediction of marketWinningPredictions) {
+        const shares = Number(prediction.shares) || 0;
+        prediction.payout = shares > 0 ? Math.round(shares * 100) / 100 : 0;
+        prediction.status = 'settled';
+        await prediction.save();
       }
     }
 

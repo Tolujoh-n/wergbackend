@@ -16,8 +16,21 @@ const {
   emailStatusForUser,
 } = require('../services/emailVerificationService');
 const { assertAllowedEmail } = require('../utils/disposableEmail');
+const { recordLoginStreak } = require('../services/engagementStreakService');
 
 const router = express.Router();
+
+async function touchLoginStreak(userId) {
+  if (!userId) return;
+  try {
+    const user = await User.findById(userId);
+    if (!user) return;
+    recordLoginStreak(user);
+    await user.save();
+  } catch (e) {
+    console.warn('touchLoginStreak:', e?.message || e);
+  }
+}
 
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET || 'your-secret-key', {
@@ -174,6 +187,7 @@ router.post('/signup', signupRateLimit, requireTurnstile, async (req, res) => {
     await user.save();
 
     const token = generateToken(user._id);
+    await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -216,6 +230,7 @@ router.post('/login', loginRateLimit, requireTurnstile, async (req, res) => {
 
     const token = generateToken(user._id);
     ensureLegacyWalletLink(user).catch(() => {});
+    await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -345,6 +360,7 @@ router.post('/wallet-login', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const token = generateToken(user._id);
+    await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -366,6 +382,7 @@ router.post('/wallet-signup', async (req, res) => {
       const existingUser = await User.findById(existingLink.user);
       if (existingUser) {
         const token = generateToken(existingUser._id);
+        await touchLoginStreak(existingUser._id);
         return res.json({ token, user: await toUserResponse(existingUser, { fast: true }) });
       }
     }
@@ -376,6 +393,7 @@ router.post('/wallet-signup', async (req, res) => {
     await WalletLink.create({ walletAddress, user: user._id });
 
     const token = generateToken(user._id);
+    await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -497,6 +515,7 @@ router.post('/google', async (req, res) => {
 
     const token = generateToken(user._id);
     ensureLegacyWalletLink(user).catch(() => {});
+    await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -510,6 +529,7 @@ router.get('/me', auth, async (req, res) => {
     const { ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
     await ensureLegacyEmailVerifiedAt(user);
     await ensureLegacyWalletLink(user);
+    await touchLoginStreak(user._id);
     res.json({ user: await toUserResponse(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
