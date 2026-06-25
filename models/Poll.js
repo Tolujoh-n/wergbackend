@@ -116,7 +116,8 @@ const pollSchema = new mongoose.Schema({
     default: false,
   },
   sponsoredImages: [{
-    type: String,
+    url: { type: String },
+    link: { type: String, default: '' },
   }],
   /** Scheduled event date/time (displayed to users in GMT). */
   date: {

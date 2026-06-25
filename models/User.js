@@ -45,9 +45,15 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  /** Legacy daily remaining (kept in sync for display; source of truth is freeTicketsUsedToday). */
   tickets: {
     type: Number,
     default: 1,
+  },
+  /** Free tickets (daily limit + NFT bonus) consumed during the current UTC day. Resets daily. */
+  freeTicketsUsedToday: {
+    type: Number,
+    default: 0,
   },
   /** Accumulating spendable tickets (boost rewards, admin gifts). */
   goldenTickets: {

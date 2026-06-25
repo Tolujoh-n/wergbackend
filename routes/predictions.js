@@ -29,6 +29,11 @@ const {
   validateVerifiedBoostNet,
   txHashRegex,
 } = require('../utils/boostFees');
+const {
+  normalizeBoostOutcomeForItem,
+  findBoostPredictionByOutcome,
+  serializeBoostPredictions,
+} = require('../utils/boostOutcome');
 
 const router = express.Router();
 
@@ -372,15 +377,40 @@ router.post('/boost', auth, async (req, res) => {
         return res.status(400).json({ message: 'Invalid outcome for match.' });
       }
       outcomeToStore = normalized;
+    } else if (pollId) {
+      outcomeToStore = normalizeBoostOutcomeForItem(outcome, item, false);
+      if (item.optionType === 'options' && Array.isArray(item.options) && item.options.length > 0) {
+        const valid = item.options.some(
+          (opt) => String(opt?.text || '').trim().toLowerCase() === String(outcomeToStore).toLowerCase()
+        );
+        if (!valid) {
+          return res.status(400).json({ message: 'Invalid option for this poll.' });
+        }
+      }
     }
 
     const query = {
       user: req.user._id,
       type: 'boost',
-      outcome: outcomeToStore,
     };
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
+
+    const existingBoostRows = await Prediction.find(query);
+    const existingBoostPrediction = findBoostPredictionByOutcome(
+      existingBoostRows,
+      outcomeToStore,
+      item,
+      Boolean(matchId)
+    );
+
+    if (existingBoostPrediction) {
+      return res.status(409).json({
+        message: 'You already have a boost on this outcome. Use Add Stake to increase your position.',
+        code: 'BOOST_OUTCOME_EXISTS',
+        prediction: existingBoostPrediction,
+      });
+    }
 
     const linkedWallet = await assertWalletLinkedToUser({
       userId: req.user._id,
@@ -426,16 +456,6 @@ router.post('/boost', auth, async (req, res) => {
           }
         }
       }
-    }
-
-    const existingBoostPrediction = await Prediction.findOne(query);
-
-    if (existingBoostPrediction) {
-      return res.status(409).json({
-        message: 'You already have a boost on this outcome. Use Add Stake to increase your position.',
-        code: 'BOOST_OUTCOME_EXISTS',
-        prediction: existingBoostPrediction,
-      });
     }
 
     const fees = await getFees();
@@ -555,8 +575,13 @@ router.get('/match/:matchId/user', auth, async (req, res) => {
     
     // For market and boost types, return all predictions (one per option/outcome)
     if (type === 'market' || type === 'boost') {
+      const item = await Match.findById(req.params.matchId);
       const predictions = await Prediction.find(query)
-        .populate('match', 'teamA teamB date status result isResolved');
+        .populate('match', 'teamA teamB date status result isResolved drawEnabled');
+      if (type === 'boost' && item) {
+        const serialized = await serializeBoostPredictions(predictions, item, true, { repair: true });
+        return res.json(serialized);
+      }
       return res.json(predictions);
     }
     
@@ -589,8 +614,13 @@ router.get('/poll/:pollId/user', auth, async (req, res) => {
     
     // For market and boost types, return all predictions (one per option/outcome)
     if (type === 'market' || type === 'boost') {
+      const item = await Poll.findById(req.params.pollId);
       const predictions = await Prediction.find(query)
-        .populate('poll', 'question type status result isResolved');
+        .populate('poll', 'question type status result isResolved optionType options');
+      if (type === 'boost' && item) {
+        const serialized = await serializeBoostPredictions(predictions, item, false, { repair: true });
+        return res.json(serialized);
+      }
       return res.json(predictions);
     }
     
@@ -736,15 +766,15 @@ router.post('/boost/reconcile-pending', auth, async (req, res) => {
         $or: [{ match: itemId }, { poll: itemId }],
       };
 
+      const allBoostPreds = await Prediction.find(predQuery);
       let prediction = outcomeHint
-        ? await Prediction.findOne({ ...predQuery, outcome: outcomeHint })
+        ? findBoostPredictionByOutcome(allBoostPreds, outcomeHint, item, isMatch)
         : null;
-      if (!prediction) prediction = await Prediction.findOne(predQuery);
 
       if (row.action === 'boost_stake') {
         if (!prediction) {
           if (!outcomeHint) continue;
-          let outcomeToStore = outcomeHint;
+          let outcomeToStore = normalizeBoostOutcomeForItem(outcomeHint, item, isMatch);
           if (isMatch && item.teamA != null && item.teamB != null) {
             const normalized = normalizeMatchOutcome(outcomeHint, item.teamA, item.teamB, item.drawEnabled);
             if (normalized) outcomeToStore = normalized;

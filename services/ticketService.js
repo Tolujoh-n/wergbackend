@@ -86,10 +86,23 @@ function goldenTicketsForBoostAmount(rate, stakeUsdc) {
 async function resetDailyTicketsIfNeeded(user) {
   const today = startOfUtcDay();
   const last = user.lastTicketDate ? startOfUtcDay(new Date(user.lastTicketDate)) : null;
-  if (!last || last.getTime() < today.getTime()) {
+  const isNewDay = !last || last.getTime() < today.getTime();
+
+  if (isNewDay) {
+    // New UTC day: free tickets do NOT accumulate — reset the daily consumption counter.
     const limit = await getDailyFreeTicketsLimit();
-    user.tickets = limit;
+    user.freeTicketsUsedToday = 0;
+    user.tickets = limit; // legacy display field
     user.lastTicketDate = today;
+    await user.save();
+    return user;
+  }
+
+  // Same day: migrate legacy accounts that never had a used-today counter.
+  if (user.freeTicketsUsedToday == null) {
+    const limit = await getDailyFreeTicketsLimit();
+    const legacyRemaining = Math.max(0, user.tickets || 0);
+    user.freeTicketsUsedToday = Math.max(0, limit - legacyRemaining);
     await user.save();
   }
   return user;
@@ -359,13 +372,21 @@ async function getTicketBalances(userId, { additionalWallets = [], forceVerify =
 
   const nftBonus = nftBonusList.reduce((s, n) => s + (n.holds ? (n.dailyTickets || 0) : 0), 0);
   const dailyLimit = await getDailyFreeTicketsLimit();
-  const normalTickets = Math.max(0, (user.tickets || 0) + nftBonus);
+
+  // Free pool for the day = daily limit + NFT/FT holder bonus. Consumption is tracked
+  // separately (freeTicketsUsedToday) so spent tickets never regenerate on refetch.
+  const freePool = Math.max(0, dailyLimit + nftBonus);
+  const usedToday = Math.max(0, user.freeTicketsUsedToday || 0);
+  const normalTickets = Math.max(0, freePool - usedToday);
   const goldenTickets = Math.max(0, user.goldenTickets || 0);
+
   return {
     normalTickets,
     goldenTickets,
     nftBonusToday: nftBonus,
     dailyLimit,
+    freePool,
+    freeUsedToday: usedToday,
     totalSpendable: normalTickets + goldenTickets,
     nftBonuses: nftBonusList,
     holdingsRefreshing,
@@ -374,38 +395,38 @@ async function getTicketBalances(userId, { additionalWallets = [], forceVerify =
 }
 
 /**
- * Deduct tickets: golden first or normal first? User said both spendable — use golden last to preserve accumulation value, or golden first?
- * Prefer spend normal daily tickets first, then golden.
+ * Spend tickets: ALWAYS use free (daily + NFT bonus) tickets first, then golden tickets.
+ * Consumption is persisted atomically so balances stay stable across refetches.
  */
 async function deductTickets(userId, amount) {
+  const qty = Math.max(0, parseInt(amount, 10) || 0);
+  if (qty <= 0) return { fromNormal: 0, fromGolden: 0 };
+
   const balances = await getTicketBalances(userId, { forceVerify: true });
-  if (balances.totalSpendable < amount) {
+  if (balances.totalSpendable < qty) {
     const err = new Error('Insufficient tickets');
     err.statusCode = 400;
     err.details = balances;
     throw err;
   }
 
-  let user = await User.findById(userId);
-  const nftBonus = balances.nftBonusToday;
-  const dailyBase = Math.max(0, (user.tickets || 0));
-  const normalAvailable = dailyBase + nftBonus;
+  // Free first, then golden.
+  const fromNormal = Math.min(qty, balances.normalTickets);
+  const fromGolden = qty - fromNormal;
 
-  let remaining = amount;
-  let fromNormal = Math.min(remaining, normalAvailable);
-  remaining -= fromNormal;
-  const fromGolden = remaining;
+  const inc = {};
+  if (fromNormal > 0) inc.freeTicketsUsedToday = fromNormal;
+  if (fromGolden > 0) inc.goldenTickets = -fromGolden;
 
-  if (fromNormal > 0) {
-    const deductFromDaily = Math.min(fromNormal, dailyBase);
-    user.tickets = Math.max(0, dailyBase - deductFromDaily);
-    await user.save();
+  if (Object.keys(inc).length > 0) {
+    await User.findByIdAndUpdate(userId, { $inc: inc });
   }
-  if (fromGolden > 0) {
-    user = await User.findById(userId);
-    user.goldenTickets = Math.max(0, (user.goldenTickets || 0) - fromGolden);
-    await user.save();
-  }
+
+  // Keep legacy display field roughly in sync (golden excluded; nft bonus excluded).
+  const updated = await User.findById(userId).select('freeTicketsUsedToday');
+  const dailyLimit = await getDailyFreeTicketsLimit();
+  const legacyRemaining = Math.max(0, dailyLimit - Math.max(0, updated?.freeTicketsUsedToday || 0));
+  await User.findByIdAndUpdate(userId, { tickets: legacyRemaining });
 
   return { fromNormal, fromGolden };
 }

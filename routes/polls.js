@@ -4,6 +4,13 @@ const Cup = require('../models/Cup');
 const { auth, isAdmin } = require('../middleware/auth');
 const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
 const { scheduleMarketMakerSeed } = require('../services/marketMakerQuotes');
+const { normalizeSponsoredImages } = require('../utils/sponsoredImages');
+
+function attachSponsoredImages(doc) {
+  const payload = doc.toObject ? doc.toObject() : { ...doc };
+  payload.sponsoredImages = normalizeSponsoredImages(payload.sponsoredImages);
+  return payload;
+}
 
 const router = express.Router();
 
@@ -26,7 +33,7 @@ router.get('/:id', async (req, res) => {
     if (!poll) {
       return res.status(404).json({ message: 'Poll not found' });
     }
-    res.json(poll);
+    res.json(attachSponsoredImages(poll));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -47,7 +54,7 @@ router.get('/cup/:cupSlug', async (req, res) => {
     }
 
     const polls = await Poll.find(query).populate('stage', 'name').sort({ createdAt: -1 });
-    res.json(polls);
+    res.json(polls.map((poll) => attachSponsoredImages(poll)));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

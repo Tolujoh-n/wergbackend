@@ -31,6 +31,10 @@ const matchSchema = new mongoose.Schema({
   stageName: {
     type: String,
   },
+  description: {
+    type: String,
+    default: '',
+  },
   status: {
     type: String,
     enum: ['upcoming', 'live', 'completed', 'locked'],
@@ -133,7 +137,8 @@ const matchSchema = new mongoose.Schema({
     default: false,
   },
   sponsoredImages: [{
-    type: String,
+    url: { type: String },
+    link: { type: String, default: '' },
   }],
   lockedTime: {
     type: Date,

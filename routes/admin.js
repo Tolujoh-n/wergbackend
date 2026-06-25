@@ -22,6 +22,7 @@ const {
   listActiveGrants,
   cancelGrant,
 } = require('../services/goldenTicketDailyGrantService');
+const { normalizeSponsoredImages } = require('../utils/sponsoredImages');
 
 const router = express.Router();
 
@@ -410,6 +411,7 @@ router.post('/matches', async (req, res) => {
       cup,
       stage,
       stageName,
+      description,
       marketId,
       marketTeamALiquidity,
       marketTeamBLiquidity,
@@ -462,6 +464,7 @@ router.post('/matches', async (req, res) => {
       cup: cupDoc._id,
       stage: stageDoc?._id,
       stageName: stageDoc?.name || stageName,
+      description: description ? String(description).trim() : '',
       marketId: marketId ? parseInt(marketId, 10) : undefined,
       ...(orderbookContractAddressLower() ? { contractAddress: orderbookContractAddressLower() } : {}),
       // Legacy liquidity fields kept for backward compatibility; we store sum(YES+NO) per outcome here.
@@ -482,7 +485,7 @@ router.post('/matches', async (req, res) => {
       startingPrices: normalizeStartingPricesRows(Array.isArray(startingPrices) ? startingPrices : []),
       isFeatured: isFeatured || false,
       isSponsored: isSponsored || false,
-      sponsoredImages: Array.isArray(sponsoredImages) ? sponsoredImages.filter(img => img && img.trim() !== '') : [],
+      sponsoredImages: normalizeSponsoredImages(sponsoredImages),
       lockedTime: lockedTime && lockedTime.trim() !== '' ? new Date(lockedTime) : undefined,
       teamAImage: teamAImage || undefined,
       teamBImage: teamBImage || undefined,
@@ -512,7 +515,14 @@ router.post('/matches', async (req, res) => {
 // Update Match
 router.put('/matches/:id', async (req, res) => {
   try {
-    const match = await Match.findByIdAndUpdate(req.params.id, req.body, {
+    const updates = { ...req.body };
+    if (updates.sponsoredImages !== undefined) {
+      updates.sponsoredImages = normalizeSponsoredImages(updates.sponsoredImages);
+    }
+    if (updates.description !== undefined) {
+      updates.description = String(updates.description || '').trim();
+    }
+    const match = await Match.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
     });
@@ -864,7 +874,7 @@ router.post('/polls', async (req, res) => {
       startingPrices: normalizeStartingPricesRows(Array.isArray(startingPrices) ? startingPrices : []),
       isFeatured: isFeatured || false,
       isSponsored: isSponsored || false,
-      sponsoredImages: Array.isArray(sponsoredImages) ? sponsoredImages.filter(img => img && img.trim() !== '') : [],
+      sponsoredImages: normalizeSponsoredImages(sponsoredImages),
       lockedTime: lockedTime && lockedTime.trim() !== '' ? new Date(lockedTime) : undefined,
       // Polls are option-based only (no default YES/NO poll)
       optionType: 'options',
@@ -922,6 +932,9 @@ router.post('/polls', async (req, res) => {
 router.put('/polls/:id', async (req, res) => {
   try {
     const updates = { ...req.body };
+    if (updates.sponsoredImages !== undefined) {
+      updates.sponsoredImages = normalizeSponsoredImages(updates.sponsoredImages);
+    }
     if (updates.date !== undefined) {
       updates.date =
         updates.date && String(updates.date).trim() !== '' ? new Date(updates.date) : null;

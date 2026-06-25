@@ -4,6 +4,13 @@ const Cup = require('../models/Cup');
 const Stage = require('../models/Stage');
 const { auth, isAdmin } = require('../middleware/auth');
 const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
+const { normalizeSponsoredImages } = require('../utils/sponsoredImages');
+
+function attachSponsoredImages(doc) {
+  const payload = doc.toObject ? doc.toObject() : { ...doc };
+  payload.sponsoredImages = normalizeSponsoredImages(payload.sponsoredImages);
+  return payload;
+}
 
 const router = express.Router();
 
@@ -29,7 +36,7 @@ router.get('/:id', async (req, res) => {
     if (!match) {
       return res.status(404).json({ message: 'Match not found' });
     }
-    const payload = match.toObject ? match.toObject() : { ...match };
+    const payload = attachSponsoredImages(match);
     // Canonical outcome options on the smart contract for this match (used for boost/market)
     payload.contractOutcomes =
       match.drawEnabled === false ? ['TeamA', 'TeamB'] : ['TeamA', 'Draw', 'TeamB'];
@@ -51,8 +58,8 @@ router.get('/cup/:cupSlug', async (req, res) => {
       .populate('stage', 'name')
       .sort({ date: 1 });
 
-    const matchesWithStageName = matches.map(match => ({
-      ...match.toObject(),
+    const matchesWithStageName = matches.map((match) => ({
+      ...attachSponsoredImages(match),
       stageName: match.stage?.name || 'Unknown',
     }));
 
