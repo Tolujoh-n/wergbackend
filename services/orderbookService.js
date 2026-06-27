@@ -9,6 +9,7 @@ const WalletLink = require('../models/WalletLink');
 const SettlementOutbox = require('../models/SettlementOutbox');
 const { processSettlementOutboxBatch, applyLegsToOrderbookPositions } = require('./settlementOutbox');
 const { getContractAddress, getJsonRpcProvider } = require('../utils/chainConfig');
+const { isEventLockedByTime } = require('../utils/eventLock');
 const {
   orderbookContractAddressLower,
   withOrderbookContract,
@@ -254,6 +255,9 @@ async function loadItem(matchId, pollId) {
 function assertTradable(item) {
   if (item.status === 'locked' || item.status === 'completed' || item.isResolved) {
     throw Object.assign(new Error('Market not tradable'), { statusCode: 400 });
+  }
+  if (isEventLockedByTime(item)) {
+    throw Object.assign(new Error('Market is locked for this match/poll'), { statusCode: 400 });
   }
   if (!item.marketId) {
     throw Object.assign(new Error('No chain market'), { statusCode: 400 });

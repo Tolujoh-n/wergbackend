@@ -34,6 +34,7 @@ const {
   findBoostPredictionByOutcome,
   serializeBoostPredictions,
 } = require('../utils/boostOutcome');
+const { isEventLockedByTime } = require('../utils/eventLock');
 
 const router = express.Router();
 
@@ -118,12 +119,13 @@ function normalizeMatchOutcome(outcome, teamA, teamB, drawEnabled = true) {
   return null;
 }
 
-/** Admin status only — not scheduled lockedTime. Boost/play until admin locks or resolves. */
+/** Closed when resolved, admin status locked/settled/ended, OR scheduled lockedTime reached. */
 function isBoostStakeOpen(item) {
   if (!item) return false;
   if (item.isResolved === true) return false;
   const s = String(item.status || '').toLowerCase().trim();
   if (s === 'locked' || s === 'settled' || s === 'ended') return false;
+  if (isEventLockedByTime(item)) return false;
   return true;
 }
 
@@ -368,6 +370,9 @@ router.post('/boost', auth, async (req, res) => {
     }
     if (item.isResolved) {
       return res.status(400).json({ message: 'Item is resolved' });
+    }
+    if (isEventLockedByTime(item)) {
+      return res.status(400).json({ message: 'Predictions are locked for this match/poll' });
     }
 
     let outcomeToStore = outcome;
