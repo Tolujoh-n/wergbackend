@@ -16,7 +16,7 @@ const {
 } = require('./services/settlementOutbox');
 const { migrateOrderbookPositionLedger } = require('./utils/orderbookPositionLedger');
 const { processAllDueGoldenTicketGrants } = require('./services/goldenTicketDailyGrantService');
-const { corsOptions, applyCorsHeaders } = require('./utils/corsConfig');
+const { corsOptions, applyCorsHeaders, isAllowedOrigin } = require('./utils/corsConfig');
 
 const app = express();
 
@@ -26,6 +26,20 @@ app.use(applyCorsHeaders);
 app.use(cors(corsOptions()));
 app.use(applyCorsHeaders);
 app.use(express.json());
+
+// Lightweight health checks for uptime monitors / load balancers (no DB hit required).
+const healthHandler = (req, res) => {
+  const dbState = mongoose.connection.readyState; // 1 = connected
+  res.json({
+    ok: true,
+    db: dbState === 1 ? 'connected' : 'disconnected',
+    dbState,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+};
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -70,50 +84,117 @@ app.get('/api/config/claim', (req, res) => {
   });
 });
 
+// 404 for unknown API routes (keeps CORS headers from applyCorsHeaders above).
+app.use('/api', (req, res) => {
+  res.status(404).json({ message: 'Not found' });
+});
+
+// Global error handler — ensures a thrown route error returns JSON WITH CORS headers
+// instead of bubbling to a generic 500 (which the browser would report as a CORS error).
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && isAllowedOrigin(origin) && !res.headersSent) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+  console.error('[express error]', req.method, req.originalUrl, '-', err?.message || err);
+  if (res.headersSent) return;
+  const status = err?.statusCode || err?.status || 500;
+  res.status(status).json({ message: err?.message || 'Server error' });
+});
+
 const PORT = process.env.PORT || 5000;
 
-mongoose
-  .connect(process.env.MONGODB_URI || '')
-  .then(async () => {
-    console.log('MongoDB connected');
-    try {
-      await migrateOrderbookPositionLedger();
-    } catch (e) {
-      console.warn('[orderbook] position ledger migration:', e.message || e);
-    }
-    updateEthPrice();
-    cron.schedule('*/5 * * * *', async () => {
-      console.log('Updating USDC price from CoinGecko...');
-      await updateEthPrice();
-    });
-    cron.schedule('* * * * *', async () => {
-      try {
-        await marketMakerMaintenanceOnce();
-      } catch (e) {
-        console.error('marketMakerMaintenanceOnce', e.message);
-      }
-      try {
-        await releaseStaleProcessingJobs(120000);
-        await processSettlementOutboxBatch(10);
-      } catch (e) {
-        console.error('settlementOutbox maintenance', e.message || e);
-      }
-    });
-    cron.schedule('5 * * * *', async () => {
-      try {
-        const r = await processAllDueGoldenTicketGrants();
-        if (r.ticketsGranted > 0) {
-          console.log(
-            `goldenTicketDailyGrants: ${r.ticketsGranted} ticket(s) to ${r.usersTouched} user(s)`
-          );
-        }
-      } catch (e) {
-        console.error('goldenTicketDailyGrants', e.message);
-      }
-    });
-  })
-  .catch((err) => console.error('MongoDB connection error:', err));
+// Keep the process alive on unexpected errors so the whole API never goes down
+// from a single stray exception (e.g. a cron job hitting an RPC hiccup).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err?.message || err);
+});
 
+async function connectWithRetry(attempt = 1) {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI || '', {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 20,
+    });
+  } catch (err) {
+    const delay = Math.min(30000, attempt * 3000);
+    console.error(
+      `MongoDB connection error (attempt ${attempt}):`,
+      err?.message || err,
+      `— retrying in ${delay / 1000}s`
+    );
+    setTimeout(() => connectWithRetry(attempt + 1), delay);
+  }
+}
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('[mongo] disconnected — driver will attempt to reconnect');
+});
+mongoose.connection.on('reconnected', () => {
+  console.log('[mongo] reconnected');
+});
+
+// One-time background jobs — scheduled only after the DB is first connected.
+let backgroundJobsStarted = false;
+async function startBackgroundJobs() {
+  if (backgroundJobsStarted) return;
+  backgroundJobsStarted = true;
+  try {
+    await migrateOrderbookPositionLedger();
+  } catch (e) {
+    console.warn('[orderbook] position ledger migration:', e.message || e);
+  }
+  updateEthPrice();
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      await updateEthPrice();
+    } catch (e) {
+      console.error('updateEthPrice', e.message || e);
+    }
+  });
+  cron.schedule('* * * * *', async () => {
+    try {
+      await marketMakerMaintenanceOnce();
+    } catch (e) {
+      console.error('marketMakerMaintenanceOnce', e.message);
+    }
+    try {
+      await releaseStaleProcessingJobs(120000);
+      await processSettlementOutboxBatch(10);
+    } catch (e) {
+      console.error('settlementOutbox maintenance', e.message || e);
+    }
+  });
+  cron.schedule('5 * * * *', async () => {
+    try {
+      const r = await processAllDueGoldenTicketGrants();
+      if (r.ticketsGranted > 0) {
+        console.log(
+          `goldenTicketDailyGrants: ${r.ticketsGranted} ticket(s) to ${r.usersTouched} user(s)`
+        );
+      }
+    } catch (e) {
+      console.error('goldenTicketDailyGrants', e.message);
+    }
+  });
+}
+
+mongoose.connection.once('connected', () => {
+  console.log('MongoDB connected');
+  startBackgroundJobs();
+});
+
+connectWithRetry();
+
+// Start serving immediately. Routes that need the DB fail per-request (handled by the
+// global error handler) instead of taking the whole server down while the DB connects.
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

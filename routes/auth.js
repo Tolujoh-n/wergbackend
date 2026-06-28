@@ -92,13 +92,17 @@ async function toUserResponse(user, options = {}) {
   }
 
   const [wallets, ticketInfo, adminAccess] = await Promise.all([
-    getUserWallets(user._id),
+    getUserWallets(user._id).catch(() => []),
     getTicketBalances(user._id).catch(() => ({
       normalTickets: user.tickets || 0,
       goldenTickets: user.goldenTickets || 0,
       totalSpendable: (user.tickets || 0) + (user.goldenTickets || 0),
     })),
-    resolveAdminAccessForUser(user),
+    resolveAdminAccessForUser(user).catch(() => ({
+      canAccessAdmin: dbRoleHasAdminAccess(user.role),
+      isContractAdmin: false,
+      contractAdminWallets: [],
+    })),
   ]);
 
   return {
@@ -526,12 +530,29 @@ router.post('/google', async (req, res) => {
 router.get('/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    const { ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
-    await ensureLegacyEmailVerifiedAt(user);
-    await ensureLegacyWalletLink(user);
-    await touchLoginStreak(user._id);
+    if (!user) {
+      return res.status(401).json({ message: 'Token is not valid' });
+    }
+    // Best-effort migrations/side-effects — must never break the identity check.
+    try {
+      const { ensureLegacyEmailVerifiedAt } = require('../services/emailVerificationService');
+      await ensureLegacyEmailVerifiedAt(user);
+    } catch (e) {
+      console.warn('me: ensureLegacyEmailVerifiedAt', e?.message || e);
+    }
+    try {
+      await ensureLegacyWalletLink(user);
+    } catch (e) {
+      console.warn('me: ensureLegacyWalletLink', e?.message || e);
+    }
+    try {
+      await touchLoginStreak(user._id);
+    } catch (e) {
+      console.warn('me: touchLoginStreak', e?.message || e);
+    }
     res.json({ user: await toUserResponse(user) });
   } catch (error) {
+    console.error('me: failed', error?.message || error);
     res.status(500).json({ message: error.message });
   }
 });
