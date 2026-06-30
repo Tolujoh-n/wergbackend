@@ -26,7 +26,10 @@ function applyBoostPoolPayouts({ boostPool, boostPredictions }) {
   const pool = Math.max(0, Number(boostPool) || 0);
   const originalStakes = new Map();
   for (const prediction of boostPredictions) {
-    originalStakes.set(prediction._id.toString(), prediction.totalStake || prediction.amount || 0);
+    // Fall back to originalStake: a prior resolve zeroes the stake of losing picks, so on a
+    // result change a now-winning pick must recover its real stake to be weighted correctly.
+    const stake = prediction.totalStake || prediction.amount || prediction.originalStake || 0;
+    originalStakes.set(prediction._id.toString(), stake);
   }
 
   const winningBoostPredictions = boostPredictions.filter((p) => p.status === 'won');

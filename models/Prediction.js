@@ -73,6 +73,12 @@ const predictionSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  // Free predictions: amount received from the free jackpot pool at the last resolve.
+  // Tracked so a result change (re-resolve) can reverse it exactly before redistributing.
+  jackpotPayout: {
+    type: Number,
+    default: 0,
+  },
   claimed: {
     type: Boolean,
     default: false,

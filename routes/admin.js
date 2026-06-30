@@ -593,12 +593,53 @@ router.delete('/matches/:id', async (req, res) => {
 // Resolve Match
 router.post('/matches/:id/resolve', async (req, res) => {
   try {
-    let { result } = req.body;
+    let { result, reResolve } = req.body;
     
     const match = await Match.findById(req.params.id);
     
     if (!match) {
       return res.status(404).json({ message: 'Match not found' });
+    }
+
+    const wasAlreadyResolved = match.isResolved === true;
+    const isReResolve = wasAlreadyResolved || reResolve === true;
+
+    if (isReResolve && wasAlreadyResolved) {
+      // Reset predictions and reverse the previous pool distributions so they can be
+      // re-distributed to the new winners (free by tickets, boost by stake).
+      const existing = await Prediction.find({ match: match._id });
+      const reverseFreeByUser = new Map();
+      for (const prediction of existing) {
+        if (prediction.type === 'free' && (prediction.jackpotPayout || 0) > 0) {
+          const uid = prediction.user.toString();
+          reverseFreeByUser.set(uid, (reverseFreeByUser.get(uid) || 0) + prediction.jackpotPayout);
+          prediction.jackpotPayout = 0;
+        }
+        if (prediction.type === 'boost' || prediction.type === 'free' || prediction.type === 'market') {
+          // Restore boost stake wiped by the previous resolve so re-distribution is weighted correctly.
+          if (prediction.type === 'boost' && (prediction.originalStake || 0) > 0) {
+            prediction.totalStake = prediction.originalStake;
+            prediction.amount = prediction.originalStake;
+          }
+          prediction.status = 'pending';
+          prediction.payout = 0;
+          prediction.claimed = false;
+          await prediction.save();
+        }
+      }
+      // Claw back the previously credited free-jackpot balances (once per user).
+      for (const [uid, amt] of reverseFreeByUser.entries()) {
+        const user = await User.findById(uid);
+        if (user) {
+          user.jackpotBalance = Math.max(0, (user.jackpotBalance || 0) - amt);
+          user.jackpotWins = Math.max(0, (user.jackpotWins || 0) - 1);
+          await user.save();
+        }
+      }
+      // Reconstitute the undistributed free pool: what was distributed before
+      // (originalFreeJackpotPool) plus any amount the admin added after the last resolve.
+      match.freeJackpotPool = (match.originalFreeJackpotPool || 0) + (match.freeJackpotPool || 0);
+      // boostPool is never zeroed at resolve, so it already holds net stakes + admin top-ups.
     }
 
     // Normalize result - accept teamA, teamB, draw (case-insensitive) or team names
@@ -667,8 +708,8 @@ router.post('/matches/:id/resolve', async (req, res) => {
         prediction.status = 'won';
       } else {
         prediction.status = 'lost';
-        // For losing market predictions, set shares to 0
-        if (prediction.type === 'market') {
+        // For losing market predictions, set shares to 0 (only on first resolve)
+        if (prediction.type === 'market' && !wasAlreadyResolved) {
           prediction.shares = 0;
         }
         // Note: Don't zero out boost losing stakes yet - we need them for payout calculation
@@ -719,15 +760,18 @@ router.post('/matches/:id/resolve', async (req, res) => {
 
     try {
       const { finalizeOrderbookMarketOnResolve } = require('../services/orderbookMarketFinalize');
-      const fin = await finalizeOrderbookMarketOnResolve(match);
-      if (fin?.txHash) {
-        console.log('orderbook finalize (match):', fin);
+      if (!wasAlreadyResolved) {
+        const fin = await finalizeOrderbookMarketOnResolve(match);
+        if (fin?.txHash) {
+          console.log('orderbook finalize (match):', fin);
+        }
       }
     } catch (e) {
       console.error('orderbook finalize (match):', e.message || e);
     }
 
-    // Boost: winners split the full boostPool (net stakes + admin top-ups) by stake weight
+    // Boost: winners split the full boostPool (net stakes + admin top-ups) by stake weight.
+    // Runs on first resolve AND on a result change so the pool follows the new winners.
     match.originalBoostPool = match.boostPool || 0;
     if (boostPredictions.length > 0) {
       const { applyBoostPoolPayouts } = require('../utils/boostPayout');
@@ -737,26 +781,41 @@ router.post('/matches/:id/resolve', async (req, res) => {
       }
     }
 
-    // Distribute jackpots to winners
-    // Store original jackpot amounts before distribution (for display after resolution)
+    // Free jackpot: distribute by tickets to the winners. Runs on first resolve AND on a
+    // result change (the pool was reconstituted + reversed above for re-resolve).
     match.originalFreeJackpotPool = match.freeJackpotPool || 0;
-    
-    const { distributeJackpotByTickets } = require('../utils/jackpotDistribution');
-    const freeWinningPredictions = predictions.filter((p) => p.type === 'free' && p.status === 'won');
-    if (freeWinningPredictions.length > 0 && match.freeJackpotPool > 0) {
-      const payouts = distributeJackpotByTickets(freeWinningPredictions, match.freeJackpotPool);
-      for (const [userId, amount] of payouts.entries()) {
-        const user = await User.findById(userId);
-        if (user && amount > 0) {
-          user.jackpotBalance = (user.jackpotBalance || 0) + amount;
-          user.jackpotWins = (user.jackpotWins || 0) + 1;
-          await user.save();
+    {
+      const freeJackpotPoolAmount = match.freeJackpotPool || 0;
+      const freeWinningPredictions = predictions.filter((p) => p.type === 'free' && p.status === 'won');
+      if (freeWinningPredictions.length > 0 && freeJackpotPoolAmount > 0) {
+        let totalTickets = 0;
+        for (const p of freeWinningPredictions) {
+          totalTickets += Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
         }
+        const perTicket = totalTickets > 0 ? freeJackpotPoolAmount / totalTickets : 0;
+        const perUser = new Map();
+        for (const p of freeWinningPredictions) {
+          const t = Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
+          const amt = perTicket * t;
+          p.jackpotPayout = amt;
+          await p.save();
+          const uid = p.user.toString();
+          perUser.set(uid, (perUser.get(uid) || 0) + amt);
+        }
+        for (const [userId, amount] of perUser.entries()) {
+          const user = await User.findById(userId);
+          if (user && amount > 0) {
+            user.jackpotBalance = (user.jackpotBalance || 0) + amount;
+            user.jackpotWins = (user.jackpotWins || 0) + 1;
+            await user.save();
+          }
+        }
+        match.freeJackpotPool = 0;
       }
-      match.freeJackpotPool = 0;
     }
-    
-    // Award points to winning free predictions
+
+    // Award points to winning free predictions (first resolve only — avoid inflation on re-resolve)
+    if (!wasAlreadyResolved) {
     const freeWinningPredictionsForPoints = predictions.filter(p => p.type === 'free' && p.status === 'won');
     if (freeWinningPredictionsForPoints.length > 0) {
       const pointsPerWinSetting = await Settings.findOne({ key: 'pointsPerWin' });
@@ -771,6 +830,7 @@ router.post('/matches/:id/resolve', async (req, res) => {
           await user.save();
         }
       }
+    }
     }
 
     await match.save();
@@ -1061,12 +1121,50 @@ router.delete('/polls/:id', async (req, res) => {
 // Resolve Poll
 router.post('/polls/:id/resolve', async (req, res) => {
   try {
-    const { result, optionIndex } = req.body;
+    const { result, optionIndex, reResolve } = req.body;
     
     const poll = await Poll.findById(req.params.id);
     
     if (!poll) {
       return res.status(404).json({ message: 'Poll not found' });
+    }
+
+    const wasAlreadyResolved = poll.isResolved === true;
+    const isReResolve = wasAlreadyResolved || reResolve === true;
+
+    if (isReResolve && wasAlreadyResolved) {
+      // Reset predictions and reverse the previous pool distributions so they can be
+      // re-distributed to the new winners (free by tickets, boost by stake).
+      const existing = await Prediction.find({ poll: poll._id });
+      const reverseFreeByUser = new Map();
+      for (const prediction of existing) {
+        if (prediction.type === 'free' && (prediction.jackpotPayout || 0) > 0) {
+          const uid = prediction.user.toString();
+          reverseFreeByUser.set(uid, (reverseFreeByUser.get(uid) || 0) + prediction.jackpotPayout);
+          prediction.jackpotPayout = 0;
+        }
+        if (prediction.type === 'boost' || prediction.type === 'free' || prediction.type === 'market') {
+          if (prediction.type === 'boost' && (prediction.originalStake || 0) > 0) {
+            prediction.totalStake = prediction.originalStake;
+            prediction.amount = prediction.originalStake;
+          }
+          prediction.status = 'pending';
+          prediction.payout = 0;
+          prediction.claimed = false;
+          await prediction.save();
+        }
+      }
+      for (const [uid, amt] of reverseFreeByUser.entries()) {
+        const user = await User.findById(uid);
+        if (user) {
+          user.jackpotBalance = Math.max(0, (user.jackpotBalance || 0) - amt);
+          user.jackpotWins = Math.max(0, (user.jackpotWins || 0) - 1);
+          await user.save();
+        }
+      }
+      // Reconstitute the undistributed free pool: previously distributed + admin top-ups since.
+      poll.freeJackpotPool = (poll.originalFreeJackpotPool || 0) + (poll.freeJackpotPool || 0);
+      // boostPool is never zeroed at resolve, so it already holds net stakes + admin top-ups.
     }
 
     let normalizedResult = '';
@@ -1153,8 +1251,8 @@ router.post('/polls/:id/resolve', async (req, res) => {
         prediction.status = 'won';
       } else {
         prediction.status = 'lost';
-        // For losing market predictions, set shares to 0
-        if (prediction.type === 'market') {
+        // For losing market predictions, set shares to 0 (only on first resolve)
+        if (prediction.type === 'market' && !wasAlreadyResolved) {
           prediction.shares = 0;
         }
         // Note: Don't zero out boost losing stakes yet - we need them for payout calculation
@@ -1206,14 +1304,17 @@ router.post('/polls/:id/resolve', async (req, res) => {
 
     try {
       const { finalizeOrderbookMarketOnResolve } = require('../services/orderbookMarketFinalize');
-      const fin = await finalizeOrderbookMarketOnResolve(poll);
-      if (fin?.txHash) {
-        console.log('orderbook finalize (poll):', fin);
+      if (!wasAlreadyResolved) {
+        const fin = await finalizeOrderbookMarketOnResolve(poll);
+        if (fin?.txHash) {
+          console.log('orderbook finalize (poll):', fin);
+        }
       }
     } catch (e) {
       console.error('orderbook finalize (poll):', e.message || e);
     }
 
+    // Boost: winners split the full boostPool by stake. Runs on first resolve AND on a result change.
     poll.originalBoostPool = poll.boostPool || 0;
     if (boostPredictions.length > 0) {
       const { applyBoostPoolPayouts } = require('../utils/boostPayout');
@@ -1223,24 +1324,41 @@ router.post('/polls/:id/resolve', async (req, res) => {
       }
     }
 
-    // Store original jackpot amounts before distribution (for display after resolution)
+    // Free jackpot: distribute by tickets. Runs on first resolve AND on a result change
+    // (pool reconstituted + previous distribution reversed above for re-resolve).
     poll.originalFreeJackpotPool = poll.freeJackpotPool || 0;
-    
-    const { distributeJackpotByTickets: distributePollJackpot } = require('../utils/jackpotDistribution');
-    const freeWinningPredictions = predictions.filter((p) => p.type === 'free' && p.status === 'won');
-    if (freeWinningPredictions.length > 0 && poll.freeJackpotPool > 0) {
-      const payouts = distributePollJackpot(freeWinningPredictions, poll.freeJackpotPool);
-      for (const [userId, amount] of payouts.entries()) {
-        const user = await User.findById(userId);
-        if (user && amount > 0) {
-          user.jackpotBalance = (user.jackpotBalance || 0) + amount;
-          user.jackpotWins = (user.jackpotWins || 0) + 1;
-          await user.save();
+    {
+      const freeJackpotPoolAmount = poll.freeJackpotPool || 0;
+      const freeWinningPredictions = predictions.filter((p) => p.type === 'free' && p.status === 'won');
+      if (freeWinningPredictions.length > 0 && freeJackpotPoolAmount > 0) {
+        let totalTickets = 0;
+        for (const p of freeWinningPredictions) {
+          totalTickets += Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
         }
+        const perTicket = totalTickets > 0 ? freeJackpotPoolAmount / totalTickets : 0;
+        const perUser = new Map();
+        for (const p of freeWinningPredictions) {
+          const t = Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
+          const amt = perTicket * t;
+          p.jackpotPayout = amt;
+          await p.save();
+          const uid = p.user.toString();
+          perUser.set(uid, (perUser.get(uid) || 0) + amt);
+        }
+        for (const [userId, amount] of perUser.entries()) {
+          const user = await User.findById(userId);
+          if (user && amount > 0) {
+            user.jackpotBalance = (user.jackpotBalance || 0) + amount;
+            user.jackpotWins = (user.jackpotWins || 0) + 1;
+            await user.save();
+          }
+        }
+        poll.freeJackpotPool = 0;
       }
-      poll.freeJackpotPool = 0;
     }
 
+    // Award points (first resolve only — avoid inflation on re-resolve)
+    if (!wasAlreadyResolved) {
     const freeWinningPredictionsForPoints = predictions.filter(p => p.type === 'free' && p.status === 'won');
     if (freeWinningPredictionsForPoints.length > 0) {
       const pointsPerWinSetting = await Settings.findOne({ key: 'pointsPerWin' });
@@ -1255,6 +1373,7 @@ router.post('/polls/:id/resolve', async (req, res) => {
           await user.save();
         }
       }
+    }
     }
     
     await poll.save();

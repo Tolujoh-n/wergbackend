@@ -327,9 +327,9 @@ router.get('/items', optionalAuth, async (req, res) => {
         displayResult = 'Draw';
       }
       
-      // Get jackpot amounts (use original if resolved)
-      const freeAmount = match.isResolved && match.originalFreeJackpotPool 
-        ? match.originalFreeJackpotPool 
+      // Get jackpot amounts (original distributed + any admin top-ups since resolve)
+      const freeAmount = match.isResolved
+        ? (match.originalFreeJackpotPool || 0) + (match.freeJackpotPool || 0)
         : (match.freeJackpotPool || 0);
       if (freeParticipants > 0 || freeAmount > 0) {
         jackpotItems.push({
@@ -408,9 +408,9 @@ router.get('/items', optionalAuth, async (req, res) => {
         }
       }
       
-      // Get jackpot amounts (use original if resolved)
-      const freeAmount = poll.isResolved && poll.originalFreeJackpotPool 
-        ? poll.originalFreeJackpotPool 
+      // Get jackpot amounts (original distributed + any admin top-ups since resolve)
+      const freeAmount = poll.isResolved
+        ? (poll.originalFreeJackpotPool || 0) + (poll.freeJackpotPool || 0)
         : (poll.freeJackpotPool || 0);
       if (freeParticipants > 0 || freeAmount > 0) {
         jackpotItems.push({

@@ -67,10 +67,9 @@ async function getFreeJackpotStats({ matchId, pollId }) {
     totalTickets += t;
   }
 
-  const pool =
-    item.isResolved && (item.originalFreeJackpotPool ?? 0) > 0
-      ? item.originalFreeJackpotPool
-      : item.freeJackpotPool || 0;
+  const pool = item.isResolved
+    ? (Number(item.originalFreeJackpotPool) || 0) + (Number(item.freeJackpotPool) || 0)
+    : Number(item.freeJackpotPool) || 0;
 
   return {
     freeJackpotPool: pool,
