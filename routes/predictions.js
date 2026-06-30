@@ -23,6 +23,7 @@ const {
   getGoldenTicketBoostRate,
 } = require('../services/ticketService');
 const UserTransaction = require('../models/UserTransaction');
+const { reserveTx, finalizeTx, releaseTx } = require('../utils/processedTx');
 const {
   splitBoostStakeGross,
   applyBoostStakeToEvent,
@@ -461,6 +462,19 @@ router.post('/boost', auth, async (req, res) => {
           }
         }
       }
+
+      // Atomic guard: the same stake tx must never be credited twice, even under
+      // concurrent requests (DB unique index on the txHash wins the race).
+      const reservation = await reserveTx('boost_stake', txHash, { user: req.user._id });
+      if (!reservation.reserved) {
+        const priorId = reservation.doc?.predictionId;
+        const existing = priorId ? await Prediction.findById(priorId) : null;
+        return res.status(existing ? 201 : 409).json(
+          existing
+            ? { prediction: existing, goldenTicketsAwarded: 0, alreadyCredited: true }
+            : { message: 'This stake transaction is already being processed.' }
+        );
+      }
     }
 
     const fees = await getFees();
@@ -511,10 +525,17 @@ router.post('/boost', auth, async (req, res) => {
         split,
         netStake: stakeForDb,
       });
+      await finalizeTx('boost_stake', txHash, { predictionId: String(prediction._id) });
     }
 
     res.status(201).json({ prediction, goldenTicketsAwarded: goldenAward });
   } catch (error) {
+    // Release the stake reservation so the user can retry after a genuine failure.
+    try {
+      if (req.body?.txHash) await releaseTx('boost_stake', req.body.txHash);
+    } catch (_) {
+      /* ignore */
+    }
     res.status(500).json({ message: error.message });
   }
 });
@@ -932,6 +953,17 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
         }
       }
 
+      // Atomic guard: never credit the same add-stake tx twice.
+      if (txKey) {
+        const reservation = await reserveTx('boost_add_stake', txHash, {
+          user: req.user._id,
+          predictionId: String(prediction._id),
+        });
+        if (!reservation.reserved) {
+          return res.json({ ...prediction.toObject(), goldenTicketsAwarded: 0, alreadyCredited: true });
+        }
+      }
+
       const rate = await getGoldenTicketBoostRate();
       goldenTicketsAwarded = goldenTicketsForBoostAmount(rate, stakeAmount);
       if (goldenTicketsAwarded > 0) await awardGoldenTickets(req.user._id, goldenTicketsAwarded);
@@ -957,6 +989,16 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
         });
         if (!verified.ok) {
           return res.status(400).json({ message: verified.reason || 'Invalid boost withdraw transaction' });
+        }
+      }
+      // Atomic guard: never process the same withdraw tx twice.
+      if (txHash && String(txHash).trim()) {
+        const reservation = await reserveTx('boost_withdraw_stake', txHash, {
+          user: req.user._id,
+          predictionId: String(prediction._id),
+        });
+        if (!reservation.reserved) {
+          return res.json({ ...prediction.toObject(), goldenTicketsAwarded: 0, alreadyProcessed: true });
         }
       }
       const currentStake = prediction.totalStake || prediction.amount || 0;
@@ -1004,6 +1046,15 @@ router.post('/boost/:predictionId/stake', auth, async (req, res) => {
       goldenTicketsAwarded,
     });
   } catch (error) {
+    // Release the stake reservation so a genuine retry is possible after a failure.
+    try {
+      const { action: act, txHash: th } = req.body || {};
+      if (th) {
+        await releaseTx(act === 'withdraw' ? 'boost_withdraw_stake' : 'boost_add_stake', th);
+      }
+    } catch (_) {
+      /* ignore */
+    }
     res.status(500).json({ message: error.message });
   }
 });
@@ -1738,6 +1789,35 @@ async function handleClaimAuthorization(req, res) {
       return res.status(403).json({ message: 'Connect the wallet used for this position' });
     }
 
+    // Atomically reserve this claim. The contract is the ultimate guard (it rejects a
+    // second claim for the same predictionId), so this short lock just stops a rapid
+    // double-click during RPC lag while still allowing a genuine retry after a cancel.
+    const CLAIM_LOCK_WINDOW_MS = 3 * 60 * 1000;
+    const lockExpiry = new Date(Date.now() - CLAIM_LOCK_WINDOW_MS);
+    const lockAcquired = await Prediction.findOneAndUpdate(
+      {
+        _id: prediction._id,
+        claimed: { $ne: true },
+        $or: [
+          { claimInProgress: { $ne: true } },
+          { claimLockedAt: { $lt: lockExpiry } },
+          { claimLockedAt: { $exists: false } },
+        ],
+      },
+      { $set: { claimInProgress: true, claimLockedAt: new Date() } },
+      { new: true }
+    );
+    if (!lockAcquired) {
+      const fresh = await Prediction.findById(prediction._id).select('claimed').lean();
+      if (fresh?.claimed) {
+        return res.status(400).json({ message: 'Already claimed' });
+      }
+      return res.status(409).json({
+        message:
+          'A claim for this position is already being processed. Please wait a few minutes, refresh, and check your wallet before trying again.',
+      });
+    }
+
     const contractAddress = ethers.getAddress(contractAddressRaw);
     const deadlineSec = Math.floor(Date.now() / 1000) + 30 * 60;
     const predictionId = predictionIdToBytes32(prediction._id.toString());
@@ -1813,6 +1893,15 @@ async function handleClaimAuthorization(req, res) {
     });
   } catch (error) {
     console.error('claim-authorization:', error);
+    // Release the in-flight lock so a genuine retry is possible after a failure.
+    try {
+      await Prediction.updateOne(
+        { _id: req.params.predictionId, claimed: { $ne: true } },
+        { $set: { claimInProgress: false } }
+      );
+    } catch (_) {
+      /* ignore */
+    }
     res.status(500).json({ message: error.message || 'Failed to authorize claim' });
   }
 }
@@ -1848,19 +1937,33 @@ router.post('/:predictionId/claim', auth, async (req, res) => {
     if (!item || !item.isResolved) {
       return res.status(400).json({ message: 'Item not resolved' });
     }
-    
-    // Mark as claimed
-    prediction.claimed = true;
-    await prediction.save();
-    
-    // Update user balance (if you have a balance field)
+
+    const { txHash } = req.body || {};
+    // Atomically flip claimed:false -> true. If another request already did it
+    // (double-click / retry after RPC timeout), updated is null and we stop here.
+    const updated = await Prediction.findOneAndUpdate(
+      { _id: prediction._id, claimed: { $ne: true } },
+      {
+        $set: {
+          claimed: true,
+          claimInProgress: false,
+          ...(txHash ? { claimTxHash: String(txHash).trim() } : {}),
+        },
+      },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(400).json({ message: 'Already claimed' });
+    }
+
+    // Update user balance (if you have a balance field) — credited once, gated above.
     const user = await User.findById(req.user._id);
     if (user) {
       user.balance = (user.balance || 0) + prediction.payout;
       await user.save();
     }
     
-    res.json({ prediction, message: 'Payout claimed successfully' });
+    res.json({ prediction: updated, message: 'Payout claimed successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

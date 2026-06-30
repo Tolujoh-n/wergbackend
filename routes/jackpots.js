@@ -13,6 +13,7 @@ const Prediction = require('../models/Prediction');
 const Match = require('../models/Match');
 const Poll = require('../models/Poll');
 const Cup = require('../models/Cup');
+const { reserveTx, finalizeTx } = require('../utils/processedTx');
 
 const router = express.Router();
 
@@ -570,6 +571,31 @@ router.post('/withdraw/authorization', auth, async (req, res) => {
       return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
     }
 
+    // Atomically reserve the withdrawal so two signatures can't be issued at once
+    // (the off-chain balance is the only gate, so two authorizations would let the
+    // same balance be withdrawn twice on-chain). Auto-expires for genuine retries.
+    const WITHDRAW_LOCK_WINDOW_MS = 10 * 60 * 1000;
+    const lockExpiry = new Date(Date.now() - WITHDRAW_LOCK_WINDOW_MS);
+    const lockAcquired = await User.findOneAndUpdate(
+      {
+        _id: req.user._id,
+        jackpotBalance: { $gte: withdrawAmount },
+        $or: [
+          { jackpotWithdrawInProgress: { $ne: true } },
+          { jackpotWithdrawLockedAt: { $lt: lockExpiry } },
+          { jackpotWithdrawLockedAt: { $exists: false } },
+        ],
+      },
+      { $set: { jackpotWithdrawInProgress: true, jackpotWithdrawLockedAt: new Date() } },
+      { new: true }
+    );
+    if (!lockAcquired) {
+      return res.status(409).json({
+        message:
+          'A jackpot withdrawal is already being processed. Please wait a few minutes, refresh, and check your wallet before trying again.',
+      });
+    }
+
     const amountWei = payoutToWei(withdrawAmount);
     const deadlineSec = Math.floor(Date.now() / 1000) + 30 * 60;
     const nonce = ethers.hexlify(crypto.randomBytes(32));
@@ -595,6 +621,15 @@ router.post('/withdraw/authorization', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('withdraw/authorization:', error);
+    // Release the in-flight lock so a genuine retry is possible after a failure.
+    try {
+      await User.updateOne(
+        { _id: req.user._id },
+        { $set: { jackpotWithdrawInProgress: false } }
+      );
+    } catch (_) {
+      /* ignore */
+    }
     res.status(500).json({ message: error.message || 'Failed to authorize withdrawal' });
   }
 });
@@ -602,7 +637,7 @@ router.post('/withdraw/authorization', auth, async (req, res) => {
 // Withdraw jackpot (update DB after on-chain withdrawal)
 router.post('/withdraw', auth, async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, txHash } = req.body;
     const user = await User.findById(req.user._id);
     
     if (!amount || parseFloat(amount) <= 0) {
@@ -615,17 +650,44 @@ router.post('/withdraw', auth, async (req, res) => {
     if (withdrawAmount > currentBalance) {
       return res.status(400).json({ message: 'Insufficient jackpot balance' });
     }
-    
-    // Update user balance
-    user.jackpotBalance = currentBalance - withdrawAmount;
-    user.jackpotWithdrawn = (user.jackpotWithdrawn || 0) + withdrawAmount;
-    await user.save();
-    
+
+    // Idempotency: the same on-chain withdrawal tx must only decrement the balance once.
+    if (txHash && String(txHash).trim()) {
+      const { reserved } = await reserveTx('jackpot_withdraw', txHash, {
+        user: req.user._id,
+        amount: withdrawAmount,
+      });
+      if (!reserved) {
+        return res.status(200).json({
+          message: 'Withdrawal already recorded',
+          alreadyProcessed: true,
+          remainingBalance: user.jackpotBalance,
+          totalWithdrawn: user.jackpotWithdrawn,
+        });
+      }
+    }
+
+    // Atomically decrement (guards against concurrent double-withdraw) and clear the lock.
+    const updated = await User.findOneAndUpdate(
+      { _id: req.user._id, jackpotBalance: { $gte: withdrawAmount } },
+      {
+        $inc: { jackpotBalance: -withdrawAmount, jackpotWithdrawn: withdrawAmount },
+        $set: { jackpotWithdrawInProgress: false },
+      },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(400).json({ message: 'Insufficient jackpot balance' });
+    }
+    if (txHash && String(txHash).trim()) {
+      await finalizeTx('jackpot_withdraw', txHash, { 'meta.completed': true });
+    }
+
     res.json({ 
       message: 'Withdrawal successful', 
       withdrawn: withdrawAmount,
-      remainingBalance: user.jackpotBalance,
-      totalWithdrawn: user.jackpotWithdrawn,
+      remainingBalance: updated.jackpotBalance,
+      totalWithdrawn: updated.jackpotWithdrawn,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

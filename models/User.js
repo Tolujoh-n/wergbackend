@@ -106,6 +106,14 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  // Atomic guard against issuing two jackpot-withdraw signatures concurrently.
+  jackpotWithdrawInProgress: {
+    type: Boolean,
+    default: false,
+  },
+  jackpotWithdrawLockedAt: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

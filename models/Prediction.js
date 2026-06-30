@@ -83,6 +83,18 @@ const predictionSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Atomic claim guard: prevents a second on-chain claim authorization being issued
+  // while one is already in flight (e.g. after an RPC timeout + user retry).
+  claimInProgress: {
+    type: Boolean,
+    default: false,
+  },
+  claimLockedAt: {
+    type: Date,
+  },
+  claimTxHash: {
+    type: String,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
