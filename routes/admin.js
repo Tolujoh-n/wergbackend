@@ -23,6 +23,12 @@ const {
   cancelGrant,
 } = require('../services/goldenTicketDailyGrantService');
 const { normalizeSponsoredImages } = require('../utils/sponsoredImages');
+const {
+  distributeFreeJackpotTopUp,
+  distributeBoostPoolTopUp,
+  getTicketTotalsByEvent,
+  displayJackpotPools,
+} = require('../utils/poolDistribution');
 
 const router = express.Router();
 
@@ -1824,7 +1830,7 @@ router.delete('/users/golden-ticket-daily-grants/:id', async (req, res) => {
   }
 });
 
-async function adjustPoolField(Model, id, field, action, amount) {
+async function adjustPoolField(Model, id, field, action, amount, options = {}) {
   const doc = await Model.findById(id);
   if (!doc) {
     const e = new Error('Not found');
@@ -1838,15 +1844,66 @@ async function adjustPoolField(Model, id, field, action, amount) {
     throw e;
   }
   const cur = doc[field] || 0;
-  if (action === 'withdraw' && cur < amt) {
+  if ((action === 'withdraw' || action === 'subtract') && cur < amt) {
     const e = new Error('Insufficient pool balance');
     e.statusCode = 400;
     throw e;
   }
   doc[field] = action === 'add' ? cur + amt : cur - amt;
   await doc.save();
+
+  // After resolution, auto-distribute admin top-ups to current winners.
+  if (doc.isResolved && action === 'add' && amt > 0) {
+    const kind = options.kind || (Model.modelName === 'Match' ? 'match' : 'poll');
+    if (field === 'freeJackpotPool') {
+      await distributeFreeJackpotTopUp({ item: doc, kind, amount: amt });
+    } else if (field === 'boostPool') {
+      await distributeBoostPoolTopUp({ item: doc, kind, amount: amt });
+    }
+  }
+
   return doc;
 }
+
+router.get('/matches-list', async (req, res) => {
+  try {
+    const matches = await Match.find().sort({ date: -1 }).lean();
+    const ticketMap = await getTicketTotalsByEvent(matches.map((m) => m._id), 'match');
+    res.json(
+      matches.map((m) => {
+        const pools = displayJackpotPools(m);
+        return {
+          ...m,
+          totalFreeTickets: ticketMap.get(String(m._id)) || 0,
+          displayFreeJackpot: pools.freeJackpot,
+          displayBoostJackpot: pools.boostJackpot,
+        };
+      })
+    );
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+router.get('/polls-list', async (req, res) => {
+  try {
+    const polls = await Poll.find().sort({ createdAt: -1 }).lean();
+    const ticketMap = await getTicketTotalsByEvent(polls.map((p) => p._id), 'poll');
+    res.json(
+      polls.map((p) => {
+        const pools = displayJackpotPools(p);
+        return {
+          ...p,
+          totalFreeTickets: ticketMap.get(String(p._id)) || 0,
+          displayFreeJackpot: pools.freeJackpot,
+          displayBoostJackpot: pools.boostJackpot,
+        };
+      })
+    );
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
 router.get('/matches/:id/jackpot-pool', async (req, res) => {
   const m = await Match.findById(req.params.id).select('freeJackpotPool originalFreeJackpotPool teamA teamB');
@@ -1856,8 +1913,8 @@ router.get('/matches/:id/jackpot-pool', async (req, res) => {
 
 router.post('/matches/:id/jackpot-pool', async (req, res) => {
   try {
-    const doc = await adjustPoolField(Match, req.params.id, 'freeJackpotPool', req.body.action, req.body.amount);
-    res.json({ freeJackpotPool: doc.freeJackpotPool });
+    const doc = await adjustPoolField(Match, req.params.id, 'freeJackpotPool', req.body.action, req.body.amount, { kind: 'match' });
+    res.json({ freeJackpotPool: doc.freeJackpotPool, originalFreeJackpotPool: doc.originalFreeJackpotPool });
   } catch (e) {
     res.status(e.statusCode || 500).json({ message: e.message });
   }
@@ -1871,8 +1928,8 @@ router.get('/matches/:id/boost-pool', async (req, res) => {
 
 router.post('/matches/:id/boost-pool', async (req, res) => {
   try {
-    const doc = await adjustPoolField(Match, req.params.id, 'boostPool', req.body.action, req.body.amount);
-    res.json({ boostPool: doc.boostPool });
+    const doc = await adjustPoolField(Match, req.params.id, 'boostPool', req.body.action, req.body.amount, { kind: 'match' });
+    res.json({ boostPool: doc.boostPool, originalBoostPool: doc.originalBoostPool });
   } catch (e) {
     res.status(e.statusCode || 500).json({ message: e.message });
   }
@@ -1886,8 +1943,8 @@ router.get('/polls/:id/jackpot-pool', async (req, res) => {
 
 router.post('/polls/:id/jackpot-pool', async (req, res) => {
   try {
-    const doc = await adjustPoolField(Poll, req.params.id, 'freeJackpotPool', req.body.action, req.body.amount);
-    res.json({ freeJackpotPool: doc.freeJackpotPool });
+    const doc = await adjustPoolField(Poll, req.params.id, 'freeJackpotPool', req.body.action, req.body.amount, { kind: 'poll' });
+    res.json({ freeJackpotPool: doc.freeJackpotPool, originalFreeJackpotPool: doc.originalFreeJackpotPool });
   } catch (e) {
     res.status(e.statusCode || 500).json({ message: e.message });
   }
@@ -1901,8 +1958,8 @@ router.get('/polls/:id/boost-pool', async (req, res) => {
 
 router.post('/polls/:id/boost-pool', async (req, res) => {
   try {
-    const doc = await adjustPoolField(Poll, req.params.id, 'boostPool', req.body.action, req.body.amount);
-    res.json({ boostPool: doc.boostPool });
+    const doc = await adjustPoolField(Poll, req.params.id, 'boostPool', req.body.action, req.body.amount, { kind: 'poll' });
+    res.json({ boostPool: doc.boostPool, originalBoostPool: doc.originalBoostPool });
   } catch (e) {
     res.status(e.statusCode || 500).json({ message: e.message });
   }

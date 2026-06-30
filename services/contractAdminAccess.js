@@ -1,7 +1,7 @@
 const { ethers } = require('ethers');
 const WalletLink = require('../models/WalletLink');
 const User = require('../models/User');
-const { getContractAddress, getJsonRpcProvider } = require('../utils/chainConfig');
+const { getContractAddress, getReadJsonRpcProvider } = require('../utils/chainConfig');
 const { getWeRgameAbiSync } = require('../utils/wergameContractAbi');
 
 const adminCache = new Map();
@@ -28,7 +28,7 @@ async function isWalletOnChainAdmin(walletAddress) {
 
   let ok = false;
   try {
-    const provider = getJsonRpcProvider();
+    const provider = getReadJsonRpcProvider();
     const c = new ethers.Contract(contractAddr, getWeRgameAbiSync(), provider);
     ok = !!(await c.admins(ethers.getAddress(w)));
   } catch (e) {

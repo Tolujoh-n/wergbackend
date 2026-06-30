@@ -1,6 +1,6 @@
 const express = require('express');
 const { ethers } = require('ethers');
-const { getContractAddress, getChainId, getJsonRpcProvider, getJsonRpcProviderFallback, getUsdcAddress } = require('../utils/chainConfig');
+const { getContractAddress, getChainId, getReadJsonRpcProvider, getJsonRpcProviderFallback, getUsdcAddress } = require('../utils/chainConfig');
 const { getClaimSignerAddress } = require('../utils/claimAuth');
 const { getWeRgameAbiSync } = require('../utils/wergameContractAbi');
 
@@ -58,7 +58,7 @@ router.get('/blockchain/usdc-state', async (req, res) => {
       return res.json(hit.data);
     }
 
-    const provider = getJsonRpcProvider();
+    const provider = getReadJsonRpcProvider();
     const erc = new ethers.Contract(
       usdcAddress,
       [
@@ -115,7 +115,7 @@ router.get('/blockchain/verify', async (req, res) => {
     if (!contractAddress || !usdcAddress) {
       return res.status(503).json({ ok: false, message: 'CONTRACT_ADDRESS or USDC_ADDRESS not configured' });
     }
-    const provider = getJsonRpcProvider();
+    const provider = getReadJsonRpcProvider();
     const chainId = Number((await provider.getNetwork()).chainId);
     const wergCode = await provider.getCode(contractAddress);
     const usdcCode = await provider.getCode(usdcAddress);

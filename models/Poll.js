@@ -156,8 +156,13 @@ const pollSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  // Platform fees collected
+  // Platform fees collected (boost / game fees)
   platformFees: {
+    type: Number,
+    default: 0,
+  },
+  // Market platform fees collected (orderbook + AMM market trading)
+  marketPlatformFees: {
     type: Number,
     default: 0,
   },

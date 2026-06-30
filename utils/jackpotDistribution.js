@@ -36,7 +36,7 @@ function estimateFreeJackpotPotentialWin({ freeJackpotPoolUsdc = 0, userTickets 
   return pool * (userT / outcomeTotal);
 }
 
-async function getFreeJackpotStats({ matchId, pollId }) {
+async function getFreeJackpotStats({ matchId, pollId, userId }) {
   const Prediction = require('../models/Prediction');
   const Match = require('../models/Match');
   const Poll = require('../models/Poll');
@@ -60,21 +60,51 @@ async function getFreeJackpotStats({ matchId, pollId }) {
   const predictions = await Prediction.find(query).lean();
   const ticketsByOutcome = {};
   let totalTickets = 0;
+  let userTickets = 0;
   for (const p of predictions) {
     const key = normalizeBoostOutcomeKey(p.outcome, item, kind);
     const t = Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
     ticketsByOutcome[key] = (ticketsByOutcome[key] || 0) + t;
     totalTickets += t;
+    if (userId && String(p.user) === String(userId)) {
+      userTickets += t;
+    }
   }
 
   const pool = item.isResolved
     ? (Number(item.originalFreeJackpotPool) || 0) + (Number(item.freeJackpotPool) || 0)
     : Number(item.freeJackpotPool) || 0;
 
+  let userJackpotWinAmount = null;
+  if (userId && item.isResolved) {
+    const mine = predictions.filter(
+      (p) => String(p.user) === String(userId) && p.status === 'won'
+    );
+    const tracked = mine.reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
+    if (tracked > 0) {
+      userJackpotWinAmount = tracked;
+    } else if (mine.length > 0 && pool > 0) {
+      let winTotalTickets = 0;
+      const winningPreds = predictions.filter((p) => p.status === 'won');
+      for (const p of winningPreds) {
+        winTotalTickets += Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
+      }
+      if (winTotalTickets > 0) {
+        userJackpotWinAmount = (pool / winTotalTickets) * userTickets;
+      } else {
+        userJackpotWinAmount = 0;
+      }
+    } else if (mine.length === 0) {
+      userJackpotWinAmount = 0;
+    }
+  }
+
   return {
     freeJackpotPool: pool,
     ticketsByOutcome,
     totalTickets,
+    userTickets,
+    userJackpotWinAmount,
   };
 }
 

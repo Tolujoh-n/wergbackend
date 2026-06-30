@@ -2,16 +2,32 @@ const { ethers } = require('ethers');
 
 /** Base mainnet defaults — override via env for testnet or other networks. */
 const BASE_MAINNET_CHAIN_ID = 8453;
-const BASE_MAINNET_RPC = 'https://mainnet.base.org';
+const BASE_MAINNET_RPC_READ = 'https://mainnet.base.org';
+const BASE_MAINNET_RPC_WRITE = 'https://base-mainnet.g.alchemy.com/v2/Hxf5ScqK60A4F79smz5VX';
 const BASE_MAINNET_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-function getRpcUrl() {
+/** Public Base RPC for read-only calls (balance checks, contract views). */
+function getReadRpcUrl() {
   return (
-    process.env.BASE_RPC_URL ||
-    process.env.BASE_RPC ||
-    process.env.REACT_APP_RPC_URL ||
-    BASE_MAINNET_RPC
+    process.env.BASE_READ_RPC_URL ||
+    process.env.BASE_RPC_READ_URL ||
+    BASE_MAINNET_RPC_READ
   );
+}
+
+/** Private Alchemy (or dedicated) RPC for signed transactions (relayer, settlement bot). */
+function getWriteRpcUrl() {
+  return (
+    process.env.BASE_WRITE_RPC_URL ||
+    process.env.BASE_RPC_WRITE_URL ||
+    process.env.BASE_RPC_URL ||
+    BASE_MAINNET_RPC_WRITE
+  );
+}
+
+/** @deprecated Prefer getReadRpcUrl / getWriteRpcUrl — kept for status endpoints. */
+function getRpcUrl() {
+  return getWriteRpcUrl();
 }
 
 function getRpcFallbackUrl() {
@@ -47,38 +63,61 @@ function getBlockExplorerBase() {
   return process.env.BLOCK_EXPLORER || 'https://basescan.org';
 }
 
-/**
- * Single JsonRpcProvider for server-side reads/sends. Uses CHAIN_ID + staticNetwork
- * so ethers does not depend on a separate eth_chainId "network detect" round-trip.
- */
-let cachedProvider = null;
-let cachedProviderUrl = null;
+let cachedReadProvider = null;
+let cachedReadProviderUrl = null;
+let cachedWriteProvider = null;
+let cachedWriteProviderUrl = null;
+let cachedFallbackProvider = null;
+let cachedFallbackProviderUrl = null;
 
-function getJsonRpcProvider() {
-  const url = getRpcUrl();
+function createCachedProvider(url, cacheRef) {
   const chainId = getChainId();
-  if (cachedProvider && cachedProviderUrl === url) return cachedProvider;
-  cachedProvider = new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
-  cachedProviderUrl = url;
-  return cachedProvider;
+  if (cacheRef.provider && cacheRef.url === url) return cacheRef.provider;
+  cacheRef.provider = new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
+  cacheRef.url = url;
+  return cacheRef.provider;
 }
 
-/** Fallback provider when primary RPC is rate-limited. */
+const readCache = { provider: null, url: null };
+const writeCache = { provider: null, url: null };
+const fallbackCache = { provider: null, url: null };
+
+/** Read-only JsonRpcProvider (public Base RPC + fallback). */
+function getReadJsonRpcProvider() {
+  return createCachedProvider(getReadRpcUrl(), readCache);
+}
+
+/** JsonRpcProvider for relayer / settlement bot signed transactions. */
+function getWriteJsonRpcProvider() {
+  return createCachedProvider(getWriteRpcUrl(), writeCache);
+}
+
+/** Fallback provider when primary RPC is rate-limited (read or write). */
 function getJsonRpcProviderFallback() {
   const url = getRpcFallbackUrl();
-  const chainId = getChainId();
-  return new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
+  return createCachedProvider(url, fallbackCache);
+}
+
+/** @deprecated Use getReadJsonRpcProvider or getWriteJsonRpcProvider explicitly. */
+function getJsonRpcProvider() {
+  return getWriteJsonRpcProvider();
 }
 
 module.exports = {
   BASE_MAINNET_CHAIN_ID,
-  BASE_MAINNET_RPC,
+  BASE_MAINNET_RPC_READ,
+  BASE_MAINNET_RPC_WRITE,
   BASE_MAINNET_USDC,
+  getReadRpcUrl,
+  getWriteRpcUrl,
   getRpcUrl,
+  getRpcFallbackUrl,
   getChainId,
   getUsdcAddress,
   getContractAddress,
   getBlockExplorerBase,
+  getReadJsonRpcProvider,
+  getWriteJsonRpcProvider,
   getJsonRpcProvider,
   getJsonRpcProviderFallback,
 };

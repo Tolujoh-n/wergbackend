@@ -1,6 +1,6 @@
 const { ethers } = require('ethers');
 const { getWeRgameAbiSync } = require('./wergameContractAbi');
-const { getJsonRpcProvider, getContractAddress } = require('./chainConfig');
+const { getWriteJsonRpcProvider, getContractAddress } = require('./chainConfig');
 const { normalizePrivateKey } = require('./claimAuth');
 
 function getSettlementWallet() {
@@ -12,7 +12,7 @@ function getSettlementWallet() {
     err.statusCode = 503;
     throw err;
   }
-  const provider = getJsonRpcProvider();
+  const provider = getWriteJsonRpcProvider();
   return new ethers.Wallet(pk, provider);
 }
 

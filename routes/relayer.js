@@ -2,7 +2,7 @@ const express = require('express');
 const { ethers } = require('ethers');
 const { auth } = require('../middleware/auth');
 const WalletLink = require('../models/WalletLink');
-const { getRpcUrl, getChainId, getJsonRpcProvider } = require('../utils/chainConfig');
+const { getReadRpcUrl, getWriteRpcUrl, getChainId, getReadJsonRpcProvider, getWriteJsonRpcProvider } = require('../utils/chainConfig');
 
 const router = express.Router();
 
@@ -83,10 +83,11 @@ router.post('/gasdrip', auth, async (req, res) => {
       return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
     }
 
-    const provider = getJsonRpcProvider();
+    const readProvider = getReadJsonRpcProvider();
+    const writeProvider = getWriteJsonRpcProvider();
     // sanity check network to avoid dripping on wrong chain
     try {
-      const net = await provider.getNetwork();
+      const net = await readProvider.getNetwork();
       const expected = BigInt(getChainId());
       if (net.chainId !== expected) {
         return res.status(503).json({
@@ -98,7 +99,7 @@ router.post('/gasdrip', auth, async (req, res) => {
     }
     const { minBalanceWei, sendAmountWei } = getGasDripConfig();
 
-    const currentBal = await provider.getBalance(checksum);
+    const currentBal = await readProvider.getBalance(checksum);
     if (currentBal >= minBalanceWei) {
       return res.json({
         ok: true,
@@ -109,8 +110,8 @@ router.post('/gasdrip', auth, async (req, res) => {
       });
     }
 
-    const relayer = getRelayerWallet(provider);
-    const relayerBal = await provider.getBalance(relayer.address);
+    const relayer = getRelayerWallet(writeProvider);
+    const relayerBal = await readProvider.getBalance(relayer.address);
     if (relayerBal < sendAmountWei) {
       return res.status(503).json({
         message: 'Relayer has insufficient balance to drip gas',
@@ -140,13 +141,15 @@ router.post('/gasdrip', auth, async (req, res) => {
 // Debug/status endpoint (authenticated) to quickly see if relayer is configured
 router.get('/status', auth, async (req, res) => {
   try {
-    const provider = getJsonRpcProvider();
-    const relayer = getRelayerWallet(provider);
-    const bal = await provider.getBalance(relayer.address);
+    const readProvider = getReadJsonRpcProvider();
+    const writeProvider = getWriteJsonRpcProvider();
+    const relayer = getRelayerWallet(writeProvider);
+    const bal = await readProvider.getBalance(relayer.address);
     const { minBalanceWei, sendAmountWei } = getGasDripConfig();
     res.json({
       ok: true,
-      rpcUrl: getRpcUrl(),
+      rpcReadUrl: getReadRpcUrl(),
+      rpcWriteUrl: getWriteRpcUrl(),
       relayerAddress: relayer.address,
       relayerBalanceWei: bal.toString(),
       relayerBalanceEth: ethers.formatEther(bal),

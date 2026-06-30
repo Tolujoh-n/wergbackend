@@ -2,7 +2,7 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const WalletLink = require('../models/WalletLink');
 const { ethers } = require('ethers');
-const { getJsonRpcProvider } = require('../utils/chainConfig');
+const { getReadJsonRpcProvider } = require('../utils/chainConfig');
 const { anyWalletHoldsToken, normalizeTokenStandard } = require('../utils/tokenHoldings');
 
 /** Re-verify on-chain holdings in the background after this age. */
@@ -255,7 +255,7 @@ async function getNftBonusesForUser(userId = null, { additionalWallets = [] } = 
     wallets = mergeWalletList(linkedWallets, additionalWallets);
     if (wallets.length) {
       try {
-        provider = getJsonRpcProvider();
+        provider = getReadJsonRpcProvider();
       } catch (e) {
         console.warn('ticketService: RPC unavailable for NFT verification', e?.message || e);
         provider = null;

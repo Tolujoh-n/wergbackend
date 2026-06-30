@@ -40,6 +40,12 @@ function userJackpotWinFields({
   if (!won) {
     return { userJackpotParticipated: true, userJackpotWinAmount: 0 };
   }
+  const trackedPayout = mine
+    .filter(isWinnerTest)
+    .reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
+  if (trackedPayout > 0) {
+    return { userJackpotParticipated: true, userJackpotWinAmount: trackedPayout };
+  }
   const pool = Number(originalPool) > 0 ? Number(originalPool) : Number(poolFallback) || 0;
   const winningPreds = predictions.filter((p) => p.type === jackpotType && isWinnerTest(p));
   let totalTickets = 0;
@@ -331,6 +337,15 @@ router.get('/items', optionalAuth, async (req, res) => {
       const freeAmount = match.isResolved
         ? (match.originalFreeJackpotPool || 0) + (match.freeJackpotPool || 0)
         : (match.freeJackpotPool || 0);
+      const freeTotalTickets = freePredictions.reduce(
+        (sum, p) => sum + Math.max(1, parseInt(p.ticketsStaked, 10) || 1),
+        0
+      );
+      const userFreeTickets = req.user
+        ? freePredictions
+            .filter((p) => String(p.user) === String(req.user._id))
+            .reduce((sum, p) => sum + Math.max(1, parseInt(p.ticketsStaked, 10) || 1), 0)
+        : 0;
       if (freeParticipants > 0 || freeAmount > 0) {
         jackpotItems.push({
           _id: `match-${match._id}-jackpot`,
@@ -341,6 +356,8 @@ router.get('/items', optionalAuth, async (req, res) => {
           cup: match.cup ? { name: match.cup.name, slug: match.cup.slug } : null,
           status: match.isResolved ? 'resolved' : 'pending',
           amount: freeAmount,
+          totalTickets: freeTotalTickets,
+          userTickets: userFreeTickets,
           participants: freeParticipants || 0,
           winners: freeWinners || 0,
           losers: freeLosers || 0,
@@ -412,6 +429,15 @@ router.get('/items', optionalAuth, async (req, res) => {
       const freeAmount = poll.isResolved
         ? (poll.originalFreeJackpotPool || 0) + (poll.freeJackpotPool || 0)
         : (poll.freeJackpotPool || 0);
+      const freeTotalTickets = freePredictions.reduce(
+        (sum, p) => sum + Math.max(1, parseInt(p.ticketsStaked, 10) || 1),
+        0
+      );
+      const userFreeTickets = req.user
+        ? freePredictions
+            .filter((p) => String(p.user) === String(req.user._id))
+            .reduce((sum, p) => sum + Math.max(1, parseInt(p.ticketsStaked, 10) || 1), 0)
+        : 0;
       if (freeParticipants > 0 || freeAmount > 0) {
         jackpotItems.push({
           _id: `poll-${poll._id}-jackpot`,
@@ -422,6 +448,8 @@ router.get('/items', optionalAuth, async (req, res) => {
           cup: poll.cup ? { name: poll.cup.name, slug: poll.cup.slug } : null,
           status: poll.isResolved ? 'resolved' : 'pending',
           amount: freeAmount,
+          totalTickets: freeTotalTickets,
+          userTickets: userFreeTickets,
           participants: freeParticipants || 0,
           winners: freeWinners || 0,
           losers: freeLosers || 0,

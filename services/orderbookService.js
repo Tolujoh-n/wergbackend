@@ -8,7 +8,7 @@ const Settings = require('../models/Settings');
 const WalletLink = require('../models/WalletLink');
 const SettlementOutbox = require('../models/SettlementOutbox');
 const { processSettlementOutboxBatch, applyLegsToOrderbookPositions } = require('./settlementOutbox');
-const { getContractAddress, getJsonRpcProvider } = require('../utils/chainConfig');
+const { getContractAddress, getReadJsonRpcProvider } = require('../utils/chainConfig');
 const { isEventLockedByTime } = require('../utils/eventLock');
 const {
   orderbookContractAddressLower,
@@ -164,7 +164,7 @@ function positionKey(optionKey, side) {
 async function readVaultBalance(wallet) {
   const addr = getContractAddress();
   if (!addr) return 0;
-  const provider = getJsonRpcProvider();
+  const provider = getReadJsonRpcProvider();
   const c = new ethers.Contract(addr, getWeRgameAbiSync(), provider);
   const bal = await c.tradingVaultBalances(ethers.getAddress(wallet));
   return unitsToFloat(bal);
@@ -481,12 +481,12 @@ async function continueOrderMatchSettlement(orderId, item, kind, fees) {
         if (matchId) {
           await Match.updateOne(
             { _id: matchId },
-            { $inc: { freeJackpotPool: feeJackpotUsd, platformFees: feePlatformUsd } }
+            { $inc: { freeJackpotPool: feeJackpotUsd, marketPlatformFees: feePlatformUsd } }
           ).session(session);
         } else if (pollId) {
           await Poll.updateOne(
             { _id: pollId },
-            { $inc: { freeJackpotPool: feeJackpotUsd, platformFees: feePlatformUsd } }
+            { $inc: { freeJackpotPool: feeJackpotUsd, marketPlatformFees: feePlatformUsd } }
           ).session(session);
         }
       }
@@ -887,12 +887,12 @@ async function placeOrder(payload) {
         if (matchId) {
           await Match.updateOne(
             { _id: matchId },
-            { $inc: { freeJackpotPool: feeJackpotUsd, platformFees: feePlatformUsd } }
+            { $inc: { freeJackpotPool: feeJackpotUsd, marketPlatformFees: feePlatformUsd } }
           ).session(session);
         } else if (pollId) {
           await Poll.updateOne(
             { _id: pollId },
-            { $inc: { freeJackpotPool: feeJackpotUsd, platformFees: feePlatformUsd } }
+            { $inc: { freeJackpotPool: feeJackpotUsd, marketPlatformFees: feePlatformUsd } }
           ).session(session);
         }
       }

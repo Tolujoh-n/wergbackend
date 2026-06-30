@@ -7,7 +7,7 @@ const { invalidateResolvedMarketCache } = require('../utils/resolvedMarkets');
 const { readVaultBalance } = require('./orderbookService');
 const { applyLegsToOrderbookPositions } = require('./settlementOutbox');
 const { finalizeResolvedMarketSettlementsOnChain } = require('../utils/settlementRelay');
-const { getContractAddress, getJsonRpcProvider } = require('../utils/chainConfig');
+const { getContractAddress, getReadJsonRpcProvider } = require('../utils/chainConfig');
 const { getWeRgameAbiSync } = require('../utils/wergameContractAbi');
 
 const USDC_DECIMALS = parseInt(process.env.USDC_DECIMALS || '6', 10);
@@ -22,7 +22,7 @@ async function isMarketResolvedOnChain(chainMarketId) {
   const addr = getContractAddress();
   if (!addr) return false;
   try {
-    const provider = getJsonRpcProvider();
+    const provider = getReadJsonRpcProvider();
     const c = new ethers.Contract(addr, getWeRgameAbiSync(), provider);
     const market = await c.markets(BigInt(chainMarketId));
     return !!(market.resolved ?? market[5]);

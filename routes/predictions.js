@@ -6,7 +6,7 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const Trade = require('../models/Trade');
 const WalletLink = require('../models/WalletLink');
-const { auth } = require('../middleware/auth');
+const { auth, optionalAuth } = require('../middleware/auth');
 const { ethers } = require('ethers');
 const { payoutToWei, predictionIdToBytes32 } = require('../utils/claimEligibility');
 const {
@@ -542,10 +542,13 @@ router.get('/poll/:pollId/boost-stats', async (req, res) => {
   }
 });
 
-router.get('/match/:matchId/free-jackpot-stats', async (req, res) => {
+router.get('/match/:matchId/free-jackpot-stats', optionalAuth, async (req, res) => {
   try {
     const { getFreeJackpotStats } = require('../utils/jackpotDistribution');
-    const stats = await getFreeJackpotStats({ matchId: req.params.matchId });
+    const stats = await getFreeJackpotStats({
+      matchId: req.params.matchId,
+      userId: req.user?._id,
+    });
     if (!stats) return res.status(404).json({ message: 'Match not found' });
     res.json(stats);
   } catch (error) {
@@ -553,10 +556,13 @@ router.get('/match/:matchId/free-jackpot-stats', async (req, res) => {
   }
 });
 
-router.get('/poll/:pollId/free-jackpot-stats', async (req, res) => {
+router.get('/poll/:pollId/free-jackpot-stats', optionalAuth, async (req, res) => {
   try {
     const { getFreeJackpotStats } = require('../utils/jackpotDistribution');
-    const stats = await getFreeJackpotStats({ pollId: req.params.pollId });
+    const stats = await getFreeJackpotStats({
+      pollId: req.params.pollId,
+      userId: req.user?._id,
+    });
     if (!stats) return res.status(404).json({ message: 'Poll not found' });
     res.json(stats);
   } catch (error) {
@@ -1184,7 +1190,7 @@ router.post('/market/buy', auth, async (req, res) => {
       }
       // Update fees and jackpot pools
       item.freeJackpotPool = (item.freeJackpotPool || 0) + freeJackpotFeeAmount;
-      item.platformFees = (item.platformFees || 0) + marketPlatformFeeAmount;
+      item.marketPlatformFees = (item.marketPlatformFees || 0) + marketPlatformFeeAmount;
     } else {
       // Handle poll
       if (item.optionType === 'options') {
@@ -1206,7 +1212,7 @@ router.post('/market/buy', auth, async (req, res) => {
       }
       // Update fees and jackpot pools for polls
       item.freeJackpotPool = (item.freeJackpotPool || 0) + freeJackpotFeeAmount;
-      item.platformFees = (item.platformFees || 0) + marketPlatformFeeAmount;
+      item.marketPlatformFees = (item.marketPlatformFees || 0) + marketPlatformFeeAmount;
     }
     
     prediction.updatedAt = new Date();

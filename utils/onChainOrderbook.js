@@ -1,6 +1,6 @@
 const { ethers } = require('ethers');
 const { getWeRgameAbiSync } = require('./wergameContractAbi');
-const { getContractAddress, getJsonRpcProvider } = require('./chainConfig');
+const { getContractAddress, getReadJsonRpcProvider } = require('./chainConfig');
 
 /**
  * Ensure the market is resolved on-chain (same as claimOrderbookPositionWithAuth).
@@ -15,7 +15,7 @@ async function assertOrderbookClaimableOnChain({ marketId, walletAddress: _w, po
     throw e;
   }
 
-  const provider = getJsonRpcProvider();
+  const provider = getReadJsonRpcProvider();
   const c = new ethers.Contract(addr, getWeRgameAbiSync(), provider);
   const mid = BigInt(marketId);
 

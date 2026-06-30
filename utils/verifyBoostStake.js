@@ -1,6 +1,6 @@
 const { ethers } = require('ethers');
 const { getWeRgameAbiSync } = require('./wergameContractAbi');
-const { getContractAddress, getJsonRpcProvider } = require('./chainConfig');
+const { getContractAddress, getReadJsonRpcProvider } = require('./chainConfig');
 
 const USDC_DECIMALS = parseInt(process.env.USDC_DECIMALS || '6', 10);
 
@@ -40,7 +40,7 @@ async function verifyBoostStakeTx({ txHash, marketId, walletAddress, outcome, ou
     return { ok: false, reason: 'Invalid wallet address' };
   }
 
-  const provider = getJsonRpcProvider();
+  const provider = getReadJsonRpcProvider();
   const receipt = await getReceiptWithRetry(provider, txHash);
   if (!receipt || receipt.status !== 1) {
     return { ok: false, reason: 'Transaction not found or failed' };
@@ -117,7 +117,7 @@ async function verifyBoostWithdrawTx({ txHash, marketId, walletAddress }) {
     return { ok: false, reason: 'Invalid wallet address' };
   }
 
-  const provider = getJsonRpcProvider();
+  const provider = getReadJsonRpcProvider();
   const receipt = await provider.getTransactionReceipt(String(txHash).trim());
   if (!receipt || receipt.status !== 1) {
     return { ok: false, reason: 'Transaction not found or failed' };
