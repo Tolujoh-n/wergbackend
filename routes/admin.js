@@ -30,6 +30,80 @@ const {
   displayJackpotPools,
 } = require('../utils/poolDistribution');
 
+/** On-chain vault sweep runs in background so resolve HTTP doesn't hit proxy timeouts. */
+function deferOrderbookFinalize(item) {
+  if (item?.marketId == null) return;
+  const snapshot = { marketId: item.marketId, _id: item._id };
+  setImmediate(() => {
+    const { finalizeOrderbookMarketOnResolve } = require('../services/orderbookMarketFinalize');
+    finalizeOrderbookMarketOnResolve(snapshot)
+      .then((fin) => {
+        if (fin?.txHash) console.log('orderbook finalize (background):', fin.txHash);
+      })
+      .catch((e) => console.error('orderbook finalize (background):', e?.message || e));
+  });
+}
+
+/** Orderbook winner rows + vault reads can be slow; run after HTTP response. */
+function deferOrderbookResolutionPredictions({ item, kind, winningOptionKey, totalMarketLiquidity }) {
+  if (item?.marketId == null || item?._id == null) return;
+  const snapshot = {
+    itemId: item._id,
+    kind,
+    winningOptionKey,
+    totalMarketLiquidity,
+  };
+  setImmediate(async () => {
+    try {
+      const Model = kind === 'match' ? Match : Poll;
+      const fresh = await Model.findById(snapshot.itemId);
+      if (!fresh) return;
+      const { createOrderbookResolutionPredictions } = require('../services/orderbookResolution');
+      await createOrderbookResolutionPredictions({
+        item: fresh,
+        kind: snapshot.kind,
+        winningOptionKey: snapshot.winningOptionKey,
+        totalMarketLiquidity: snapshot.totalMarketLiquidity,
+      });
+    } catch (e) {
+      console.error('orderbook resolution predictions (background):', e?.message || e);
+    }
+  });
+}
+
+async function loadUsersWalletMap(userIds) {
+  const unique = [...new Set(userIds.map((id) => String(id)).filter(Boolean))];
+  if (!unique.length) return new Map();
+  const users = await User.find({ _id: { $in: unique } }).select('walletAddress jackpotBalance').lean();
+  return new Map(users.map((u) => [u._id.toString(), u]));
+}
+
+function buildClaimableWalletPayloads(predsForClaim, usersById) {
+  const claimableByWallet = {};
+  const claimableBoostByWallet = {};
+  const claimableMarketByWallet = {};
+  for (const p of predsForClaim) {
+    const userId = p.user?._id ? p.user._id : p.user;
+    if (!userId) continue;
+    const user = usersById.get(String(userId));
+    const walletAddress = user?.walletAddress || p.user?.walletAddress;
+    if (!walletAddress || !String(walletAddress).trim()) continue;
+    const w = String(walletAddress).trim();
+    const payout = p.payout || 0;
+    claimableByWallet[w] = (claimableByWallet[w] || 0) + payout;
+    if (p.type === 'boost') {
+      claimableBoostByWallet[w] = (claimableBoostByWallet[w] || 0) + payout;
+    } else {
+      claimableMarketByWallet[w] = (claimableMarketByWallet[w] || 0) + payout;
+    }
+  }
+  return {
+    claimableUpdates: Object.entries(claimableByWallet).map(([walletAddress, amount]) => ({ walletAddress, amount })),
+    claimableBoostUpdates: Object.entries(claimableBoostByWallet).map(([walletAddress, amount]) => ({ walletAddress, amount })),
+    claimableMarketUpdates: Object.entries(claimableMarketByWallet).map(([walletAddress, amount]) => ({ walletAddress, amount })),
+  };
+}
+
 const router = express.Router();
 
 // Configure multer for memory storage
@@ -611,41 +685,49 @@ router.post('/matches/:id/resolve', async (req, res) => {
     const isReResolve = wasAlreadyResolved || reResolve === true;
 
     if (isReResolve && wasAlreadyResolved) {
-      // Reset predictions and reverse the previous pool distributions so they can be
-      // re-distributed to the new winners (free by tickets, boost by stake).
       const existing = await Prediction.find({ match: match._id });
       const reverseFreeByUser = new Map();
+      const bulkOps = [];
       for (const prediction of existing) {
         if (prediction.type === 'free' && (prediction.jackpotPayout || 0) > 0) {
           const uid = prediction.user.toString();
           reverseFreeByUser.set(uid, (reverseFreeByUser.get(uid) || 0) + prediction.jackpotPayout);
-          prediction.jackpotPayout = 0;
         }
         if (prediction.type === 'boost' || prediction.type === 'free' || prediction.type === 'market') {
-          // Restore boost stake wiped by the previous resolve so re-distribution is weighted correctly.
+          const $set = {
+            status: 'pending',
+            payout: 0,
+            claimed: false,
+            jackpotPayout: 0,
+            claimInProgress: false,
+          };
           if (prediction.type === 'boost' && (prediction.originalStake || 0) > 0) {
-            prediction.totalStake = prediction.originalStake;
-            prediction.amount = prediction.originalStake;
+            $set.totalStake = prediction.originalStake;
+            $set.amount = prediction.originalStake;
           }
-          prediction.status = 'pending';
-          prediction.payout = 0;
-          prediction.claimed = false;
-          await prediction.save();
+          bulkOps.push({ updateOne: { filter: { _id: prediction._id }, update: { $set } } });
         }
       }
-      // Claw back the previously credited free-jackpot balances (once per user).
+      if (bulkOps.length) {
+        await Prediction.bulkWrite(bulkOps, { ordered: false });
+      }
       for (const [uid, amt] of reverseFreeByUser.entries()) {
-        const user = await User.findById(uid);
-        if (user) {
-          user.jackpotBalance = Math.max(0, (user.jackpotBalance || 0) - amt);
-          user.jackpotWins = Math.max(0, (user.jackpotWins || 0) - 1);
-          await user.save();
-        }
+        await User.updateOne(
+          { _id: uid },
+          {
+            $inc: { jackpotBalance: -amt, jackpotWins: -1 },
+          }
+        );
+        await User.updateOne(
+          { _id: uid, jackpotBalance: { $lt: 0 } },
+          { $set: { jackpotBalance: 0 } }
+        );
+        await User.updateOne(
+          { _id: uid, jackpotWins: { $lt: 0 } },
+          { $set: { jackpotWins: 0 } }
+        );
       }
-      // Reconstitute the undistributed free pool: what was distributed before
-      // (originalFreeJackpotPool) plus any amount the admin added after the last resolve.
       match.freeJackpotPool = (match.originalFreeJackpotPool || 0) + (match.freeJackpotPool || 0);
-      // boostPool is never zeroed at resolve, so it already holds net stakes + admin top-ups.
     }
 
     // Normalize result - accept teamA, teamB, draw (case-insensitive) or team names
@@ -690,6 +772,7 @@ router.post('/matches/:id/resolve', async (req, res) => {
     const predictions = await Prediction.find({ match: match._id });
     const boostPredictions = [];
     const marketWinningPredictions = [];
+    const predictionBulkOps = [];
 
     // First pass: determine win/loss status and collect predictions (don't save yet)
     for (const prediction of predictions) {
@@ -735,46 +818,59 @@ router.post('/matches/:id/resolve', async (req, res) => {
       if (prediction.type === 'boost') {
         boostPredictions.push(prediction);
       }
-      
-      // Save free predictions after status is set
+
       if (prediction.type === 'free') {
-        await prediction.save();
+        predictionBulkOps.push({
+          updateOne: {
+            filter: { _id: prediction._id },
+            update: { $set: { status: prediction.status } },
+          },
+        });
+      } else if (prediction.type === 'market' && prediction.status !== 'won') {
+        predictionBulkOps.push({
+          updateOne: {
+            filter: { _id: prediction._id },
+            update: {
+              $set: {
+                payout: prediction.payout,
+                status: prediction.status,
+                shares: prediction.shares,
+              },
+            },
+          },
+        });
       }
+    }
+
+    if (predictionBulkOps.length > 0) {
+      await Prediction.bulkWrite(predictionBulkOps, { ordered: false });
     }
 
     // Winning market shares pay $1 USDC each at resolution
     if (marketWinningPredictions.length > 0) {
-      for (const prediction of marketWinningPredictions) {
-        const shares = Number(prediction.shares) || 0;
-        prediction.payout = shares > 0 ? Math.round(shares * 100) / 100 : 0;
-        prediction.status = 'settled';
-        await prediction.save();
-      }
+      await Prediction.bulkWrite(
+        marketWinningPredictions.map((prediction) => {
+          const shares = Number(prediction.shares) || 0;
+          const payout = shares > 0 ? Math.round(shares * 100) / 100 : 0;
+          prediction.payout = payout;
+          prediction.status = 'settled';
+          return {
+            updateOne: {
+              filter: { _id: prediction._id },
+              update: { $set: { payout, status: 'settled' } },
+            },
+          };
+        }),
+        { ordered: false }
+      );
     }
 
-    try {
-      const { createOrderbookResolutionPredictions } = require('../services/orderbookResolution');
-      await createOrderbookResolutionPredictions({
-        item: match,
-        kind: 'match',
-        winningOptionKey: normalizedResult,
-        totalMarketLiquidity,
-      });
-    } catch (e) {
-      console.error('orderbook resolution predictions (match):', e.message || e);
-    }
-
-    try {
-      const { finalizeOrderbookMarketOnResolve } = require('../services/orderbookMarketFinalize');
-      if (!wasAlreadyResolved) {
-        const fin = await finalizeOrderbookMarketOnResolve(match);
-        if (fin?.txHash) {
-          console.log('orderbook finalize (match):', fin);
-        }
-      }
-    } catch (e) {
-      console.error('orderbook finalize (match):', e.message || e);
-    }
+    deferOrderbookResolutionPredictions({
+      item: match,
+      kind: 'match',
+      winningOptionKey: normalizedResult,
+      totalMarketLiquidity,
+    });
 
     // Boost: winners split the full boostPool (net stakes + admin top-ups) by stake weight.
     // Runs on first resolve AND on a result change so the pool follows the new winners.
@@ -782,9 +878,23 @@ router.post('/matches/:id/resolve', async (req, res) => {
     if (boostPredictions.length > 0) {
       const { applyBoostPoolPayouts } = require('../utils/boostPayout');
       applyBoostPoolPayouts({ boostPool: match.boostPool, boostPredictions });
-      for (const prediction of boostPredictions) {
-        await prediction.save();
-      }
+      await Prediction.bulkWrite(
+        boostPredictions.map((p) => ({
+          updateOne: {
+            filter: { _id: p._id },
+            update: {
+              $set: {
+                payout: p.payout,
+                status: p.status,
+                originalStake: p.originalStake,
+                amount: p.amount,
+                totalStake: p.totalStake,
+              },
+            },
+          },
+        })),
+        { ordered: false }
+      );
     }
 
     // Free jackpot: distribute by tickets to the winners. Runs on first resolve AND on a
@@ -800,21 +910,36 @@ router.post('/matches/:id/resolve', async (req, res) => {
         }
         const perTicket = totalTickets > 0 ? freeJackpotPoolAmount / totalTickets : 0;
         const perUser = new Map();
+        const jackpotBulkOps = [];
         for (const p of freeWinningPredictions) {
           const t = Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
           const amt = perTicket * t;
           p.jackpotPayout = amt;
-          await p.save();
+          jackpotBulkOps.push({
+            updateOne: {
+              filter: { _id: p._id },
+              update: { $set: { jackpotPayout: amt } },
+            },
+          });
           const uid = p.user.toString();
           perUser.set(uid, (perUser.get(uid) || 0) + amt);
         }
+        if (jackpotBulkOps.length) {
+          await Prediction.bulkWrite(jackpotBulkOps, { ordered: false });
+        }
+        const userJackpotOps = [];
         for (const [userId, amount] of perUser.entries()) {
-          const user = await User.findById(userId);
-          if (user && amount > 0) {
-            user.jackpotBalance = (user.jackpotBalance || 0) + amount;
-            user.jackpotWins = (user.jackpotWins || 0) + 1;
-            await user.save();
+          if (amount > 0) {
+            userJackpotOps.push({
+              updateOne: {
+                filter: { _id: userId },
+                update: { $inc: { jackpotBalance: amount, jackpotWins: 1 } },
+              },
+            });
           }
+        }
+        if (userJackpotOps.length) {
+          await User.bulkWrite(userJackpotOps, { ordered: false });
         }
         match.freeJackpotPool = 0;
       }
@@ -828,13 +953,19 @@ router.post('/matches/:id/resolve', async (req, res) => {
       const pointsPerWin = pointsPerWinSetting ? (typeof pointsPerWinSetting.value === 'number' ? pointsPerWinSetting.value : parseFloat(pointsPerWinSetting.value) || 10) : 10;
       
       const userIds = [...new Set(freeWinningPredictionsForPoints.map(p => p.user.toString()))];
-      for (const userId of userIds) {
-        const user = await User.findById(userId);
-        if (user) {
-          const userWins = freeWinningPredictionsForPoints.filter(p => p.user.toString() === userId).length;
-          user.points = (user.points || 0) + (userWins * pointsPerWin);
-          await user.save();
-        }
+      const pointsByUser = new Map();
+      for (const p of freeWinningPredictionsForPoints) {
+        const uid = p.user.toString();
+        pointsByUser.set(uid, (pointsByUser.get(uid) || 0) + pointsPerWin);
+      }
+      const pointsOps = [...pointsByUser.entries()].map(([userId, pts]) => ({
+        updateOne: {
+          filter: { _id: userId },
+          update: { $inc: { points: pts } },
+        },
+      }));
+      if (pointsOps.length) {
+        await User.bulkWrite(pointsOps, { ordered: false });
       }
     }
     }
@@ -847,43 +978,39 @@ router.post('/matches/:id/resolve', async (req, res) => {
       type: { $in: ['boost', 'market'] },
       status: 'settled',
       payout: { $gt: 0 },
-    });
-    const claimableByWallet = {};
-    const claimableBoostByWallet = {};
-    const claimableMarketByWallet = {};
-    for (const p of predsForClaim) {
-      const userId = p.user?._id ? p.user._id : p.user;
-      if (!userId) continue;
-      const user = await User.findById(userId).select('walletAddress').lean();
-      const walletAddress = user?.walletAddress || (p.user?.walletAddress);
-      if (!walletAddress || !walletAddress.trim()) continue;
-      const w = walletAddress.trim();
-      const payout = p.payout || 0;
-      claimableByWallet[w] = (claimableByWallet[w] || 0) + payout;
-      if (p.type === 'boost') {
-        claimableBoostByWallet[w] = (claimableBoostByWallet[w] || 0) + payout;
-      } else {
-        claimableMarketByWallet[w] = (claimableMarketByWallet[w] || 0) + payout;
-      }
-    }
-    const claimableUpdates = Object.entries(claimableByWallet).map(([walletAddress, amount]) => ({ walletAddress, amount }));
-    const claimableBoostUpdates = Object.entries(claimableBoostByWallet).map(([walletAddress, amount]) => ({ walletAddress, amount }));
-    const claimableMarketUpdates = Object.entries(claimableMarketByWallet).map(([walletAddress, amount]) => ({ walletAddress, amount }));
-    const predsWithUserForJackpot = await Prediction.find({ match: match._id }).populate('user', 'walletAddress jackpotBalance');
+    }).lean();
+    const claimUserIds = predsForClaim.map((p) => p.user).filter(Boolean);
+    const usersById = await loadUsersWalletMap(claimUserIds);
+    const {
+      claimableUpdates,
+      claimableBoostUpdates,
+      claimableMarketUpdates,
+    } = buildClaimableWalletPayloads(predsForClaim, usersById);
     const jackpotUserIds = [...new Set(
-      predsWithUserForJackpot.filter(p => (p.type === 'free' || p.type === 'boost') && p.status === 'won').map(p => (p.user?._id || p.user)?.toString()).filter(Boolean)
+      predictions
+        .filter((p) => (p.type === 'free' || p.type === 'boost') && p.status === 'won')
+        .map((p) => p.user?.toString())
+        .filter(Boolean)
     )];
+    const jackpotUsersById = await loadUsersWalletMap(jackpotUserIds);
     const jackpotUpdates = [];
     for (const uid of jackpotUserIds) {
-      const user = await User.findById(uid).select('walletAddress jackpotBalance');
-      if (user && user.walletAddress && user.jackpotBalance > 0) {
+      const user = jackpotUsersById.get(uid);
+      if (user?.walletAddress && (user.jackpotBalance || 0) > 0) {
         jackpotUpdates.push({ walletAddress: user.walletAddress, amount: user.jackpotBalance });
       }
     }
 
     res.json({ match, claimableUpdates, claimableBoostUpdates, claimableMarketUpdates, jackpotUpdates });
+
+    if (!wasAlreadyResolved) {
+      deferOrderbookFinalize(match);
+    }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('resolve match:', error?.message || error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: error.message || 'Resolve failed' });
+    }
   }
 });
 
@@ -1139,38 +1266,38 @@ router.post('/polls/:id/resolve', async (req, res) => {
     const isReResolve = wasAlreadyResolved || reResolve === true;
 
     if (isReResolve && wasAlreadyResolved) {
-      // Reset predictions and reverse the previous pool distributions so they can be
-      // re-distributed to the new winners (free by tickets, boost by stake).
       const existing = await Prediction.find({ poll: poll._id });
       const reverseFreeByUser = new Map();
+      const bulkOps = [];
       for (const prediction of existing) {
         if (prediction.type === 'free' && (prediction.jackpotPayout || 0) > 0) {
           const uid = prediction.user.toString();
           reverseFreeByUser.set(uid, (reverseFreeByUser.get(uid) || 0) + prediction.jackpotPayout);
-          prediction.jackpotPayout = 0;
         }
         if (prediction.type === 'boost' || prediction.type === 'free' || prediction.type === 'market') {
+          const $set = {
+            status: 'pending',
+            payout: 0,
+            claimed: false,
+            jackpotPayout: 0,
+            claimInProgress: false,
+          };
           if (prediction.type === 'boost' && (prediction.originalStake || 0) > 0) {
-            prediction.totalStake = prediction.originalStake;
-            prediction.amount = prediction.originalStake;
+            $set.totalStake = prediction.originalStake;
+            $set.amount = prediction.originalStake;
           }
-          prediction.status = 'pending';
-          prediction.payout = 0;
-          prediction.claimed = false;
-          await prediction.save();
+          bulkOps.push({ updateOne: { filter: { _id: prediction._id }, update: { $set } } });
         }
+      }
+      if (bulkOps.length) {
+        await Prediction.bulkWrite(bulkOps, { ordered: false });
       }
       for (const [uid, amt] of reverseFreeByUser.entries()) {
-        const user = await User.findById(uid);
-        if (user) {
-          user.jackpotBalance = Math.max(0, (user.jackpotBalance || 0) - amt);
-          user.jackpotWins = Math.max(0, (user.jackpotWins || 0) - 1);
-          await user.save();
-        }
+        await User.updateOne({ _id: uid }, { $inc: { jackpotBalance: -amt, jackpotWins: -1 } });
+        await User.updateOne({ _id: uid, jackpotBalance: { $lt: 0 } }, { $set: { jackpotBalance: 0 } });
+        await User.updateOne({ _id: uid, jackpotWins: { $lt: 0 } }, { $set: { jackpotWins: 0 } });
       }
-      // Reconstitute the undistributed free pool: previously distributed + admin top-ups since.
       poll.freeJackpotPool = (poll.originalFreeJackpotPool || 0) + (poll.freeJackpotPool || 0);
-      // boostPool is never zeroed at resolve, so it already holds net stakes + admin top-ups.
     }
 
     let normalizedResult = '';
@@ -1232,6 +1359,7 @@ router.post('/polls/:id/resolve', async (req, res) => {
     const predictions = await Prediction.find({ poll: poll._id });
     const boostPredictions = [];
     const marketWinningPredictions = [];
+    const predictionBulkOps = [];
     
     // First pass: determine win/loss status and collect predictions
     for (const prediction of predictions) {
@@ -1278,56 +1406,83 @@ router.post('/polls/:id/resolve', async (req, res) => {
       if (prediction.type === 'boost') {
         boostPredictions.push(prediction);
       }
-      
-      // Save free predictions after status is set
+
       if (prediction.type === 'free') {
-        await prediction.save();
+        predictionBulkOps.push({
+          updateOne: {
+            filter: { _id: prediction._id },
+            update: { $set: { status: prediction.status } },
+          },
+        });
+      } else if (prediction.type === 'market' && prediction.status !== 'won') {
+        predictionBulkOps.push({
+          updateOne: {
+            filter: { _id: prediction._id },
+            update: {
+              $set: {
+                payout: prediction.payout,
+                status: prediction.status,
+                shares: prediction.shares,
+              },
+            },
+          },
+        });
       }
+    }
+
+    if (predictionBulkOps.length > 0) {
+      await Prediction.bulkWrite(predictionBulkOps, { ordered: false });
     }
 
     // Winning market shares pay $1 USDC each at resolution
     if (marketWinningPredictions.length > 0) {
-      for (const prediction of marketWinningPredictions) {
-        const shares = Number(prediction.shares) || 0;
-        prediction.payout = shares > 0 ? Math.round(shares * 100) / 100 : 0;
-        prediction.status = 'settled';
-        await prediction.save();
-      }
+      await Prediction.bulkWrite(
+        marketWinningPredictions.map((prediction) => {
+          const shares = Number(prediction.shares) || 0;
+          const payout = shares > 0 ? Math.round(shares * 100) / 100 : 0;
+          prediction.payout = payout;
+          prediction.status = 'settled';
+          return {
+            updateOne: {
+              filter: { _id: prediction._id },
+              update: { $set: { payout, status: 'settled' } },
+            },
+          };
+        }),
+        { ordered: false }
+      );
     }
 
-    try {
-      const { createOrderbookResolutionPredictions } = require('../services/orderbookResolution');
-      const winKey = poll.optionType === 'options' ? winningOptionText : normalizedResult;
-      await createOrderbookResolutionPredictions({
-        item: poll,
-        kind: 'poll',
-        winningOptionKey: winKey,
-        totalMarketLiquidity,
-      });
-    } catch (e) {
-      console.error('orderbook resolution predictions (poll):', e.message || e);
-    }
-
-    try {
-      const { finalizeOrderbookMarketOnResolve } = require('../services/orderbookMarketFinalize');
-      if (!wasAlreadyResolved) {
-        const fin = await finalizeOrderbookMarketOnResolve(poll);
-        if (fin?.txHash) {
-          console.log('orderbook finalize (poll):', fin);
-        }
-      }
-    } catch (e) {
-      console.error('orderbook finalize (poll):', e.message || e);
-    }
+    const winKey = poll.optionType === 'options' ? winningOptionText : normalizedResult;
+    deferOrderbookResolutionPredictions({
+      item: poll,
+      kind: 'poll',
+      winningOptionKey: winKey,
+      totalMarketLiquidity,
+    });
 
     // Boost: winners split the full boostPool by stake. Runs on first resolve AND on a result change.
     poll.originalBoostPool = poll.boostPool || 0;
     if (boostPredictions.length > 0) {
       const { applyBoostPoolPayouts } = require('../utils/boostPayout');
       applyBoostPoolPayouts({ boostPool: poll.boostPool, boostPredictions });
-      for (const prediction of boostPredictions) {
-        await prediction.save();
-      }
+      await Prediction.bulkWrite(
+        boostPredictions.map((p) => ({
+          updateOne: {
+            filter: { _id: p._id },
+            update: {
+              $set: {
+                payout: p.payout,
+                status: p.status,
+                originalStake: p.originalStake,
+                amount: p.amount,
+                totalStake: p.totalStake,
+              },
+            },
+          },
+        })),
+        { ordered: false }
+      );
     }
 
     // Free jackpot: distribute by tickets. Runs on first resolve AND on a result change
@@ -1343,21 +1498,36 @@ router.post('/polls/:id/resolve', async (req, res) => {
         }
         const perTicket = totalTickets > 0 ? freeJackpotPoolAmount / totalTickets : 0;
         const perUser = new Map();
+        const jackpotBulkOps = [];
         for (const p of freeWinningPredictions) {
           const t = Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
           const amt = perTicket * t;
           p.jackpotPayout = amt;
-          await p.save();
+          jackpotBulkOps.push({
+            updateOne: {
+              filter: { _id: p._id },
+              update: { $set: { jackpotPayout: amt } },
+            },
+          });
           const uid = p.user.toString();
           perUser.set(uid, (perUser.get(uid) || 0) + amt);
         }
+        if (jackpotBulkOps.length) {
+          await Prediction.bulkWrite(jackpotBulkOps, { ordered: false });
+        }
+        const userJackpotOps = [];
         for (const [userId, amount] of perUser.entries()) {
-          const user = await User.findById(userId);
-          if (user && amount > 0) {
-            user.jackpotBalance = (user.jackpotBalance || 0) + amount;
-            user.jackpotWins = (user.jackpotWins || 0) + 1;
-            await user.save();
+          if (amount > 0) {
+            userJackpotOps.push({
+              updateOne: {
+                filter: { _id: userId },
+                update: { $inc: { jackpotBalance: amount, jackpotWins: 1 } },
+              },
+            });
           }
+        }
+        if (userJackpotOps.length) {
+          await User.bulkWrite(userJackpotOps, { ordered: false });
         }
         poll.freeJackpotPool = 0;
       }
@@ -1370,14 +1540,19 @@ router.post('/polls/:id/resolve', async (req, res) => {
       const pointsPerWinSetting = await Settings.findOne({ key: 'pointsPerWin' });
       const pointsPerWin = pointsPerWinSetting ? (typeof pointsPerWinSetting.value === 'number' ? pointsPerWinSetting.value : parseFloat(pointsPerWinSetting.value) || 10) : 10;
       
-      const userIds = [...new Set(freeWinningPredictionsForPoints.map(p => p.user.toString()))];
-      for (const userId of userIds) {
-        const user = await User.findById(userId);
-        if (user) {
-          const userWins = freeWinningPredictionsForPoints.filter(p => p.user.toString() === userId).length;
-          user.points = (user.points || 0) + (userWins * pointsPerWin);
-          await user.save();
-        }
+      const pointsByUser = new Map();
+      for (const p of freeWinningPredictionsForPoints) {
+        const uid = p.user.toString();
+        pointsByUser.set(uid, (pointsByUser.get(uid) || 0) + pointsPerWin);
+      }
+      const pointsOps = [...pointsByUser.entries()].map(([userId, pts]) => ({
+        updateOne: {
+          filter: { _id: userId },
+          update: { $inc: { points: pts } },
+        },
+      }));
+      if (pointsOps.length) {
+        await User.bulkWrite(pointsOps, { ordered: false });
       }
     }
     }
@@ -1390,43 +1565,39 @@ router.post('/polls/:id/resolve', async (req, res) => {
       type: { $in: ['boost', 'market'] },
       status: 'settled',
       payout: { $gt: 0 },
-    });
-    const claimableByWalletPoll = {};
-    const claimableBoostByWalletPoll = {};
-    const claimableMarketByWalletPoll = {};
-    for (const p of predsForClaimPoll) {
-      const userId = p.user?._id ? p.user._id : p.user;
-      if (!userId) continue;
-      const user = await User.findById(userId).select('walletAddress').lean();
-      const walletAddress = user?.walletAddress || (p.user?.walletAddress);
-      if (!walletAddress || !walletAddress.trim()) continue;
-      const w = walletAddress.trim();
-      const payout = p.payout || 0;
-      claimableByWalletPoll[w] = (claimableByWalletPoll[w] || 0) + payout;
-      if (p.type === 'boost') {
-        claimableBoostByWalletPoll[w] = (claimableBoostByWalletPoll[w] || 0) + payout;
-      } else {
-        claimableMarketByWalletPoll[w] = (claimableMarketByWalletPoll[w] || 0) + payout;
-      }
-    }
-    const claimableUpdates = Object.entries(claimableByWalletPoll).map(([walletAddress, amount]) => ({ walletAddress, amount }));
-    const claimableBoostUpdates = Object.entries(claimableBoostByWalletPoll).map(([walletAddress, amount]) => ({ walletAddress, amount }));
-    const claimableMarketUpdates = Object.entries(claimableMarketByWalletPoll).map(([walletAddress, amount]) => ({ walletAddress, amount }));
-    const predsWithUserForJackpotPoll = await Prediction.find({ poll: poll._id }).populate('user', 'walletAddress jackpotBalance');
-    const jackpotUserIds = [...new Set(
-      predsWithUserForJackpotPoll.filter(p => (p.type === 'free' || p.type === 'boost') && p.status === 'won').map(p => (p.user?._id || p.user)?.toString()).filter(Boolean)
+    }).lean();
+    const claimUserIdsPoll = predsForClaimPoll.map((p) => p.user).filter(Boolean);
+    const usersByIdPoll = await loadUsersWalletMap(claimUserIdsPoll);
+    const {
+      claimableUpdates,
+      claimableBoostUpdates,
+      claimableMarketUpdates,
+    } = buildClaimableWalletPayloads(predsForClaimPoll, usersByIdPoll);
+    const jackpotUserIdsPoll = [...new Set(
+      predictions
+        .filter((p) => (p.type === 'free' || p.type === 'boost') && p.status === 'won')
+        .map((p) => p.user?.toString())
+        .filter(Boolean)
     )];
+    const jackpotUsersByIdPoll = await loadUsersWalletMap(jackpotUserIdsPoll);
     const jackpotUpdates = [];
-    for (const uid of jackpotUserIds) {
-      const user = await User.findById(uid).select('walletAddress jackpotBalance');
-      if (user && user.walletAddress && user.jackpotBalance > 0) {
+    for (const uid of jackpotUserIdsPoll) {
+      const user = jackpotUsersByIdPoll.get(uid);
+      if (user?.walletAddress && (user.jackpotBalance || 0) > 0) {
         jackpotUpdates.push({ walletAddress: user.walletAddress, amount: user.jackpotBalance });
       }
     }
 
     res.json({ poll, claimableUpdates, claimableBoostUpdates, claimableMarketUpdates, jackpotUpdates });
+
+    if (!wasAlreadyResolved) {
+      deferOrderbookFinalize(poll);
+    }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('resolve poll:', error?.message || error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: error.message || 'Resolve failed' });
+    }
   }
 });
 
