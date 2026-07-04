@@ -1,0 +1,385 @@
+{
+  "generatedAt": "2026-07-03T18:41:24.788Z",
+  "dbTotals": {
+    "users": 370,
+    "usersWithUnclaimedBalance": 162,
+    "usersWhoWithdrew": 91,
+    "totalJackpotBalanceUnclaimed": 197.778623,
+    "totalJackpotWithdrawnDb": 474.443941,
+    "totalLifetimeEarnedDb": 672.222564,
+    "totalJackpotWinsCount": 441
+  },
+  "freeJackpotFromPredictions": {
+    "totalJackpotPayoutOnFreePredictions": 349.4575,
+    "winningFreePredictionRows": 359,
+    "uniqueWinners": 187
+  },
+  "onChainComparison": {
+    "onChainWithdrawnUsdc": 1576.988162,
+    "dbWithdrawnUsdc": 474.443941,
+    "withdrawnDbMinusOnChain": -1102.544221,
+    "onChainJackpotPoolRemaining": 0.196838,
+    "dbUnclaimedBalance": 197.778623,
+    "recommendedFundJackpotPoolUsdc": 197.581785,
+    "note": "recommendedFund = max(0, sum(jackpotBalance) - on-chain jackpotPool). Add buffer for pending resolves."
+  },
+  "topWalletCrossCheck": [
+    {
+      "wallet": "0x60C911A84c68E304545c97743312400e116F5Fb0",
+      "inDb": true,
+      "username": "user_0x60c911",
+      "userId": "6a315cbc7cbac7e3480c75c1",
+      "dbJackpotBalance": 2.87122344727757,
+      "dbJackpotWithdrawn": 204.07060412333342,
+      "dbJackpotWins": 15,
+      "freeJackpotWinRows": 8,
+      "freeJackpotEarnedSum": 29.442473,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x5ff2A7cd9F5e25f6451cB9De4B0225E0E70cbd6d",
+      "inDb": true,
+      "username": "AlgoRandu",
+      "userId": "6a42b166cf69e7157f29af67",
+      "dbJackpotBalance": 2.4236321721311476,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 3,
+      "freeJackpotWinRows": 3,
+      "freeJackpotEarnedSum": 2.423632,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x49c33F0C9408736A751680F1c5756A4d1f07F582",
+      "inDb": true,
+      "username": "RamadhaniMadhan",
+      "userId": "6a42aae96d5bebd407bbecb6",
+      "dbJackpotBalance": 2.791385918003565,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 3,
+      "freeJackpotWinRows": 3,
+      "freeJackpotEarnedSum": 2.791386,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x7Daf1105b42A73179538A9AC4B280F2da4e433e0",
+      "inDb": true,
+      "username": "EmakEnakgaul",
+      "userId": "6a42adb2cf69e7157f293bad",
+      "dbJackpotBalance": 2.6717424242424244,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 2.671742,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x9299187C57c8Fc24967448F9370D8856e064a4C6",
+      "inDb": true,
+      "username": "AlbertAlbert",
+      "userId": "6a42b21ccf69e7157f29cc53",
+      "dbJackpotBalance": 1.9016250000000001,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.901625,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x548244d51Ac9f5e714238e4a45d4dee1A68D0Ade",
+      "inDb": true,
+      "username": "ArieAbyan",
+      "userId": "6a42af18cf69e7157f296c30",
+      "dbJackpotBalance": 1.944139344262295,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.944139,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x02871d31f0895E38fdEDbF053c63e2259706120F",
+      "inDb": true,
+      "username": "Abdul60",
+      "userId": "6a456e28e385de9ad85c5ecc",
+      "dbJackpotBalance": 1.3022482435597191,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.302248,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x4F1a3a6F52416ACD421ea4ef0DDc96bF465E2e34",
+      "inDb": true,
+      "username": "user_0x4f1a3a",
+      "userId": "6a43bc00ec0935b012f72175",
+      "dbJackpotBalance": 0.7546212121212122,
+      "dbJackpotWithdrawn": 1.4617410714285715,
+      "dbJackpotWins": 3,
+      "freeJackpotWinRows": 3,
+      "freeJackpotEarnedSum": 2.216362,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0xe78AF8150292EAc52a5111691e60cF477B445f0D",
+      "inDb": true,
+      "username": "user_0xe78af8",
+      "userId": "6a43bd04ec0935b012f74115",
+      "dbJackpotBalance": 0.8703124999999999,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 1,
+      "freeJackpotWinRows": 1,
+      "freeJackpotEarnedSum": 0.870312,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x9E07c87064d0b1189fD886F446CeC078A90Dd71b",
+      "inDb": true,
+      "username": "AriyAbyan",
+      "userId": "6a42acfa6d5bebd407bc4de2",
+      "dbJackpotBalance": 1.2658196721311477,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.26582,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0xA60AEB71a444E5B4C569658160aeC462445fD02D",
+      "inDb": true,
+      "username": "user_0xa60aeb",
+      "userId": "6a43bed9ec0935b012f791c7",
+      "dbJackpotBalance": 0.8703124999999999,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 1,
+      "freeJackpotWinRows": 1,
+      "freeJackpotEarnedSum": 0.870312,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x7986c73B145E82BCA6f0183d361538Cd76F72eDe",
+      "inDb": true,
+      "username": "NurHayati",
+      "userId": "6a42b386cf69e7157f2a071b",
+      "dbJackpotBalance": 0,
+      "dbJackpotWithdrawn": 3.8634943181818175,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 3.863494,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0xd2B797a0cC87e991bfC2357B4a490eF7d014D5D4",
+      "inDb": true,
+      "username": "user_0xd2b797",
+      "userId": "6a43bdedec0935b012f76461",
+      "dbJackpotBalance": 1.6094375,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.609438,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0xbFd49C3D8f2Fe1Aa2e5a5774e7625D1A6A949916",
+      "inDb": true,
+      "username": "kresnagtgbgt",
+      "userId": "6a42afcccf69e7157f29826c",
+      "dbJackpotBalance": 1.2611321721311475,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.261132,
+      "walletLinked": true
+    },
+    {
+      "wallet": "0x35274921208c05312971F86c72Cf41af62d2c657",
+      "inDb": true,
+      "username": "user_0x352749",
+      "userId": "6a43ad88c3f12fb240399301",
+      "dbJackpotBalance": 1.7864285714285717,
+      "dbJackpotWithdrawn": 0,
+      "dbJackpotWins": 2,
+      "freeJackpotWinRows": 2,
+      "freeJackpotEarnedSum": 1.786429,
+      "walletLinked": true
+    }
+  ],
+  "topUnclaimedUsers": [
+    {
+      "username": "ice",
+      "jackpotBalance": 15.703753845800616,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 6,
+      "lifetimeEarned": 15.703753845800616
+    },
+    {
+      "username": "monnacheck",
+      "jackpotBalance": 11.843617416666667,
+      "jackpotWithdrawn": 9,
+      "jackpotWins": 8,
+      "lifetimeEarned": 20.843617416666667
+    },
+    {
+      "username": "Jrot8",
+      "jackpotBalance": 5.325779857397504,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 5.325779857397504
+    },
+    {
+      "username": "user_0xc6d6b2",
+      "jackpotBalance": 4.1,
+      "jackpotWithdrawn": 5,
+      "jackpotWins": 3,
+      "lifetimeEarned": 9.1
+    },
+    {
+      "username": "lorine",
+      "jackpotBalance": 3.4958333333333336,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 1,
+      "lifetimeEarned": 3.4958333333333336
+    },
+    {
+      "username": "GNiKWorld",
+      "jackpotBalance": 3.25625,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 1,
+      "lifetimeEarned": 3.25625
+    },
+    {
+      "username": "user_0x60c911",
+      "jackpotBalance": 2.87122344727757,
+      "jackpotWithdrawn": 204.07060412333342,
+      "jackpotWins": 15,
+      "lifetimeEarned": 206.941827570611
+    },
+    {
+      "username": "MartialMawuena",
+      "jackpotBalance": 2.857142857142857,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 1,
+      "lifetimeEarned": 2.857142857142857
+    },
+    {
+      "username": "RamadhaniMadhan",
+      "jackpotBalance": 2.791385918003565,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 2.791385918003565
+    },
+    {
+      "username": "EmakEnakgaul",
+      "jackpotBalance": 2.6717424242424244,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 2.6717424242424244
+    },
+    {
+      "username": "AlgoRandu",
+      "jackpotBalance": 2.4236321721311476,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 2.4236321721311476
+    },
+    {
+      "username": "Degen016",
+      "jackpotBalance": 2.4051747835497843,
+      "jackpotWithdrawn": 3.9341269841269844,
+      "jackpotWins": 5,
+      "lifetimeEarned": 6.339301767676769
+    },
+    {
+      "username": "Micheal",
+      "jackpotBalance": 2.3687462121212124,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 2.3687462121212124
+    },
+    {
+      "username": "user_0x4187cb",
+      "jackpotBalance": 2.2048182773109244,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 2.2048182773109244
+    },
+    {
+      "username": "JungleSoccer",
+      "jackpotBalance": 2.167696428571429,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 2.167696428571429
+    },
+    {
+      "username": "brightonwiseman",
+      "jackpotBalance": 2.0825,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 1,
+      "lifetimeEarned": 2.0825
+    },
+    {
+      "username": "user_0x1b1b7a",
+      "jackpotBalance": 2.0825,
+      "jackpotWithdrawn": 12.544478196666667,
+      "jackpotWins": 3,
+      "lifetimeEarned": 14.626978196666666
+    },
+    {
+      "username": "user_0x2be1fc",
+      "jackpotBalance": 2.0568694556809315,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 2.0568694556809315
+    },
+    {
+      "username": "Primejack",
+      "jackpotBalance": 2.0568694556809315,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 2.0568694556809315
+    },
+    {
+      "username": "RozanYutreu",
+      "jackpotBalance": 2.0374999999999996,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 2.0374999999999996
+    },
+    {
+      "username": "ArieAbyan",
+      "jackpotBalance": 1.944139344262295,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 1.944139344262295
+    },
+    {
+      "username": "AlbertAlbert",
+      "jackpotBalance": 1.9016250000000001,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 1.9016250000000001
+    },
+    {
+      "username": "user_0x352749",
+      "jackpotBalance": 1.7864285714285717,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 1.7864285714285717
+    },
+    {
+      "username": "Baobeiily",
+      "jackpotBalance": 1.7453124999999998,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 2,
+      "lifetimeEarned": 1.7453124999999998
+    },
+    {
+      "username": "TBlaze",
+      "jackpotBalance": 1.7368694556809312,
+      "jackpotWithdrawn": 0,
+      "jackpotWins": 3,
+      "lifetimeEarned": 1.7368694556809312
+    }
+  ]
+}

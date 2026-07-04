@@ -29,6 +29,7 @@ const {
   getTicketTotalsByEvent,
   displayJackpotPools,
 } = require('../utils/poolDistribution');
+const { deferJackpotOnChainSync } = require('../utils/jackpotOnChainSync');
 
 /** On-chain vault sweep runs in background so resolve HTTP doesn't hit proxy timeouts. */
 function deferOrderbookFinalize(item) {
@@ -699,6 +700,8 @@ router.post('/matches/:id/resolve', async (req, res) => {
             payout: 0,
             claimed: false,
             jackpotPayout: 0,
+            jackpotClaimed: false,
+            jackpotClaimInProgress: false,
             claimInProgress: false,
           };
           if (prediction.type === 'boost' && (prediction.originalStake || 0) > 0) {
@@ -940,6 +943,7 @@ router.post('/matches/:id/resolve', async (req, res) => {
         }
         if (userJackpotOps.length) {
           await User.bulkWrite(userJackpotOps, { ordered: false });
+          deferJackpotOnChainSync([...perUser.keys()]);
         }
         match.freeJackpotPool = 0;
       }
@@ -1280,6 +1284,8 @@ router.post('/polls/:id/resolve', async (req, res) => {
             payout: 0,
             claimed: false,
             jackpotPayout: 0,
+            jackpotClaimed: false,
+            jackpotClaimInProgress: false,
             claimInProgress: false,
           };
           if (prediction.type === 'boost' && (prediction.originalStake || 0) > 0) {
@@ -1528,6 +1534,7 @@ router.post('/polls/:id/resolve', async (req, res) => {
         }
         if (userJackpotOps.length) {
           await User.bulkWrite(userJackpotOps, { ordered: false });
+          deferJackpotOnChainSync([...perUser.keys()]);
         }
         poll.freeJackpotPool = 0;
       }

@@ -79,6 +79,21 @@ const predictionSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  /** Free jackpot USDC claimed on-chain for this prediction row. */
+  jackpotClaimed: {
+    type: Boolean,
+    default: false,
+  },
+  jackpotClaimInProgress: {
+    type: Boolean,
+    default: false,
+  },
+  jackpotClaimLockedAt: {
+    type: Date,
+  },
+  jackpotClaimTxHash: {
+    type: String,
+  },
   claimed: {
     type: Boolean,
     default: false,

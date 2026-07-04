@@ -10,7 +10,10 @@
     "seed:african-cup": "node scripts/seedAfricanCup2026.js",
     "create:privileged-user": "node scripts/createPrivilegedUser.js",
     "clear:leaderboard": "node scripts/clearLeaderboard.js",
-    "clear:streaks": "node scripts/clearStreaks.js"
+    "clear:streaks": "node scripts/clearStreaks.js",
+    "reconcile:claims": "node scripts/reconcileClaimsFromChain.js",
+    "reconcile:claims:apply": "node scripts/reconcileClaimsFromChain.js --apply",
+    "reconcile:claims:apply:sync": "node scripts/reconcileClaimsFromChain.js --apply --sync-on-chain"
   },
   "keywords": [],
   "author": "",

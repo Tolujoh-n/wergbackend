@@ -98,6 +98,11 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  /** USDC reserved for an in-flight jackpot claim (debited from jackpotBalance at authorization). */
+  jackpotBalancePending: {
+    type: Number,
+    default: 0,
+  },
   jackpotWithdrawn: {
     type: Number,
     default: 0,
