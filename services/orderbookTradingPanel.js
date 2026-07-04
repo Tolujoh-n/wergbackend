@@ -165,7 +165,8 @@ async function getUserTradingPanel(userId, chainMarketId) {
     const isSettling =
       !fullyFilled &&
       !buyFillInPositions &&
-      (crossingUnfilled ||
+      (st === 'pending' ||
+        crossingUnfilled ||
         (remaining > 1e-9 && (st === 'partially_filled' || st === 'pending')) ||
         (filled > 1e-9 && (settlementPending || fillNotInPositionYet)) ||
         (String(o.orderKind || '').toLowerCase() === 'market' && remaining > 1e-9 && ACTIVE_STATUSES.includes(st)));

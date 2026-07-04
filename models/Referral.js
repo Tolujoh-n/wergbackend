@@ -24,6 +24,15 @@ const referralSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  status: {
+    type: String,
+    enum: ['pending', 'verified'],
+    default: 'pending',
+    index: true,
+  },
+  verifiedAt: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

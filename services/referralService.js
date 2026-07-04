@@ -63,15 +63,14 @@ async function ensureUserReferralCode(userId) {
 }
 
 /**
- * Attach a new user to a referrer and award golden tickets.
- * Idempotent per referred user (unique index on referredUser).
+ * Attach a new user to a referrer (pending until first free prediction).
  */
 async function processReferralSignup({ referralCodeRaw, newUserId }) {
   const code = normalizeReferralCode(referralCodeRaw);
   if (!code || !newUserId) return { applied: false };
 
   const settings = await getReferralRewardSettings();
-  if (!settings.enabled || settings.goldenTicketsPerReferral <= 0) {
+  if (!settings.enabled) {
     return { applied: false, reason: 'referrals_disabled' };
   }
 
@@ -88,14 +87,13 @@ async function processReferralSignup({ referralCodeRaw, newUserId }) {
     return { applied: false, reason: 'self_referral' };
   }
 
-  const tickets = settings.goldenTicketsPerReferral;
-
   try {
     await Referral.create({
       referrer: referrer._id,
       referredUser: newUserId,
       referralCode: code,
-      goldenTicketsAwarded: tickets,
+      status: 'pending',
+      goldenTicketsAwarded: 0,
     });
   } catch (e) {
     if (e?.code === 11000) {
@@ -105,13 +103,46 @@ async function processReferralSignup({ referralCodeRaw, newUserId }) {
   }
 
   await User.updateOne({ _id: newUserId }, { $set: { referredBy: referrer._id } });
-  if (tickets > 0) {
-    await awardGoldenTickets(referrer._id, tickets);
-  }
 
   return {
     applied: true,
     referrerId: referrer._id,
+    status: 'pending',
+    goldenTicketsAwarded: 0,
+  };
+}
+
+/**
+ * Award golden tickets when referred user makes their first free prediction.
+ */
+async function verifyReferralOnFirstFreePrediction(referredUserId) {
+  const settings = await getReferralRewardSettings();
+  if (!settings.enabled || settings.goldenTicketsPerReferral <= 0) {
+    return { verified: false, reason: 'disabled' };
+  }
+
+  const tickets = settings.goldenTicketsPerReferral;
+  const referral = await Referral.findOneAndUpdate(
+    { referredUser: referredUserId, status: 'pending' },
+    {
+      $set: {
+        status: 'verified',
+        verifiedAt: new Date(),
+        goldenTicketsAwarded: tickets,
+      },
+    },
+    { new: true }
+  );
+
+  if (!referral) {
+    return { verified: false, reason: 'not_pending' };
+  }
+
+  await awardGoldenTickets(referral.referrer, tickets);
+
+  return {
+    verified: true,
+    referrerId: referral.referrer,
     goldenTicketsAwarded: tickets,
   };
 }
@@ -128,8 +159,10 @@ async function getReferralDashboard(userId) {
   ]);
 
   const totalReferred = referrals.length;
+  const pendingReferrals = referrals.filter((r) => (r.status || 'verified') === 'pending').length;
+  const verifiedReferrals = referrals.filter((r) => (r.status || 'verified') === 'verified').length;
   const goldenTicketsFromReferrals = referrals.reduce(
-    (sum, r) => sum + (r.goldenTicketsAwarded || 0),
+    (sum, r) => sum + ((r.status === 'verified' || !r.status) ? (r.goldenTicketsAwarded || 0) : 0),
     0
   );
 
@@ -138,17 +171,24 @@ async function getReferralDashboard(userId) {
     rewardSettings: settings,
     stats: {
       totalReferred,
+      pendingReferrals,
+      verifiedReferrals,
       goldenTicketsFromReferrals,
       goldenTicketsPerReferral: settings.goldenTicketsPerReferral,
       currentGoldenTicketBalance: user?.goldenTickets ?? 0,
     },
-    referrals: referrals.map((r) => ({
-      id: r._id,
-      username: r.referredUser?.username || 'User',
-      email: r.referredUser?.email || null,
-      joinedAt: r.referredUser?.createdAt || r.createdAt,
-      goldenTicketsAwarded: r.goldenTicketsAwarded || 0,
-    })),
+    referrals: referrals.map((r) => {
+      const status = r.status || (r.goldenTicketsAwarded > 0 ? 'verified' : 'pending');
+      return {
+        id: r._id,
+        username: r.referredUser?.username || 'User',
+        email: r.referredUser?.email || null,
+        joinedAt: r.referredUser?.createdAt || r.createdAt,
+        status,
+        verifiedAt: r.verifiedAt || null,
+        goldenTicketsAwarded: status === 'verified' ? (r.goldenTicketsAwarded || 0) : 0,
+      };
+    }),
   };
 }
 
@@ -162,6 +202,7 @@ async function validateReferralCodePublic(codeRaw) {
     valid: true,
     referrerUsername: user.username,
     goldenTicketsPerReferral: settings.goldenTicketsPerReferral,
+    requiresFreePrediction: true,
   };
 }
 
@@ -171,6 +212,7 @@ module.exports = {
   setReferralRewardSettings,
   ensureUserReferralCode,
   processReferralSignup,
+  verifyReferralOnFirstFreePrediction,
   getReferralDashboard,
   validateReferralCodePublic,
   REFERRAL_SETTINGS_KEY,

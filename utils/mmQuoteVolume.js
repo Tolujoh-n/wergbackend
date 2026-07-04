@@ -1,7 +1,8 @@
 /** Per-outcome MM quote volume caps (USDC notional resting on the book). */
 
 const DEFAULT_OPTION_QUOTE_VOLUME_USDC = 200;
-const LEVELS = 3;
+const ROW_TARGET_USDC = 100;
+const MAX_MM_LEVELS = 12;
 
 function quoteVolumeRow(doc, optionKey) {
   const row = (doc?.startingPrices || []).find((r) => String(r.optionKey) === String(optionKey));
@@ -23,15 +24,48 @@ function levelSizeFromNotional(notionalUsdc, price) {
   return Math.max(0.01, Math.round((n / p) * 100) / 100);
 }
 
-/** Split side volume: half on bids, half on asks, each across LEVELS orders. */
+/** Split a USDC budget into rows of up to ROW_TARGET_USDC (e.g. 300 → [100,100,100]). */
+function splitNotionalsIntoRows(budgetUsdc) {
+  const budget = Math.max(0, Number(budgetUsdc) || 0);
+  if (budget <= 0.01) return [ROW_TARGET_USDC];
+  const rows = [];
+  let remaining = budget;
+  while (remaining > 0.01 && rows.length < MAX_MM_LEVELS) {
+    const chunk = Math.min(ROW_TARGET_USDC, remaining);
+    rows.push(chunk);
+    remaining = parseFloat((remaining - chunk).toFixed(6));
+  }
+  return rows.length ? rows : [Math.min(ROW_TARGET_USDC, budget || ROW_TARGET_USDC)];
+}
+
+/** How many bid or ask levels for one outcome side (half of side volume, ~100 USDC per row). */
+function mmLevelCountForHalf(halfVolUsdc) {
+  const half = Math.max(5, Number(halfVolUsdc) || 0);
+  return Math.min(MAX_MM_LEVELS, Math.max(1, splitNotionalsIntoRows(half).length));
+}
+
+function mmLevelCountForSide(doc, optionKey, side, quoteMult = 1) {
+  const sideVol = sideVolumeUsdc(doc, optionKey, side) * quoteMult;
+  return mmLevelCountForHalf(sideVol / 2);
+}
+
+/** Build per-level share sizes for bids and asks (~100 USDC notional per row). */
 function mmLevelSizesForSide(doc, optionKey, side, bids, asks, quoteMult = 1) {
   const sideVol = sideVolumeUsdc(doc, optionKey, side) * quoteMult;
-  const bidNotional = (sideVol / 2) / LEVELS;
-  const askNotional = (sideVol / 2) / LEVELS;
-  return {
-    bidSizes: (bids || []).slice(0, LEVELS).map((px) => levelSizeFromNotional(bidNotional, px)),
-    askSizes: (asks || []).slice(0, LEVELS).map((px) => levelSizeFromNotional(askNotional, px)),
-  };
+  const bidNotionals = splitNotionalsIntoRows(sideVol / 2);
+  const askNotionals = splitNotionalsIntoRows(sideVol / 2);
+  const levelCount = Math.max(bidNotionals.length, askNotionals.length);
+
+  const bidSizes = [];
+  const askSizes = [];
+  for (let i = 0; i < levelCount; i += 1) {
+    const bidPx = bids[Math.min(i, (bids || []).length - 1)] ?? bids?.[0] ?? 0.5;
+    const askPx = asks[Math.min(i, (asks || []).length - 1)] ?? asks?.[0] ?? 0.5;
+    bidSizes.push(levelSizeFromNotional(bidNotionals[Math.min(i, bidNotionals.length - 1)], bidPx));
+    askSizes.push(levelSizeFromNotional(askNotionals[Math.min(i, askNotionals.length - 1)], askPx));
+  }
+
+  return { bidSizes, askSizes, levelCount };
 }
 
 function normalizeStartingPriceVolumes(rows) {
@@ -50,10 +84,14 @@ function normalizeStartingPriceVolumes(rows) {
 
 module.exports = {
   DEFAULT_OPTION_QUOTE_VOLUME_USDC,
-  LEVELS,
+  ROW_TARGET_USDC,
+  MAX_MM_LEVELS,
   quoteVolumeRow,
   sideVolumeUsdc,
   levelSizeFromNotional,
+  splitNotionalsIntoRows,
+  mmLevelCountForHalf,
+  mmLevelCountForSide,
   mmLevelSizesForSide,
   normalizeStartingPriceVolumes,
 };

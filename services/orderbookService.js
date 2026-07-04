@@ -539,7 +539,7 @@ async function tryCompleteUserOrderFill(orderId, item, kind, fees) {
     return String(o?.orderKind || '').toLowerCase() === 'market';
   };
 
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     const before = await Order.findById(orderId).lean();
     if (!before || Number(before.sizeRemaining) <= 1e-9) break;
     if (!['open', 'partially_filled', 'pending'].includes(String(before.status))) break;
@@ -581,7 +581,7 @@ async function tryCompleteUserOrderFill(orderId, item, kind, fees) {
     if (!after || Number(after.sizeRemaining) <= 1e-9) break;
     const progressed = Number(after.sizeRemaining) < Number(before.sizeRemaining) - 1e-9;
     const marketOrder = await isUserMarket();
-    if (!progressed && !marketOrder && attempt >= 1) break;
+    if (!progressed && !marketOrder && attempt >= 2) break;
   }
 }
 

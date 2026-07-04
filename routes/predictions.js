@@ -222,6 +222,8 @@ router.post('/free', auth, async (req, res) => {
     if (matchId) query.match = matchId;
     if (pollId) query.poll = pollId;
 
+    const priorFreeCount = await Prediction.countDocuments({ user: req.user._id, type: 'free' });
+
     const existingPrediction = await Prediction.findOne(query);
     if (existingPrediction) {
       if (item.status === 'upcoming' || item.status === 'active') {
@@ -261,6 +263,13 @@ router.post('/free', auth, async (req, res) => {
       ticketsStaked: ticketsCount,
     });
     await prediction.save();
+
+    if (priorFreeCount === 0) {
+      const { verifyReferralOnFirstFreePrediction } = require('../services/referralService');
+      verifyReferralOnFirstFreePrediction(req.user._id).catch((e) =>
+        console.warn('referral verify:', e?.message || e)
+      );
+    }
 
     const user = await User.findById(req.user._id);
     user.totalPredictions += 1;

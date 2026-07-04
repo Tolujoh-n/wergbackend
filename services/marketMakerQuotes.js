@@ -18,7 +18,7 @@ const {
   isOptionSidePaused,
 } = require('./orderbookService');
 const { isCrossingOrder } = require('./orderbookTradingPanel');
-const { mmLevelSizesForSide, sideVolumeUsdc } = require('../utils/mmQuoteVolume');
+const { mmLevelSizesForSide, mmLevelCountForSide, sideVolumeUsdc } = require('../utils/mmQuoteVolume');
 
 function isInsufficientSharesError(e) {
   return (
@@ -27,7 +27,7 @@ function isInsufficientSharesError(e) {
   );
 }
 
-const LEVELS = 3;
+const LEVELS = 3; // legacy default; dynamic levels use mmLevelCountForSide
 const PRICE_TOL = 1e-4;
 
 /**
@@ -96,12 +96,13 @@ function pollOptionKeys(item) {
   return [];
 }
 
-function buildLevelPrices(ob, mid = 0.5) {
+function buildLevelPrices(ob, mid = 0.5, levelCount = LEVELS) {
+  const levels = Math.max(1, Math.min(12, Number(levelCount) || LEVELS));
   const spread = (ob.spreadBps ?? 80) / 10000;
-  const tick = Math.max(0.005, spread / Math.max(2, LEVELS));
+  const tick = Math.max(0.005, spread / Math.max(2, levels));
   const bids = [];
   const asks = [];
-  for (let i = 0; i < LEVELS; i++) {
+  for (let i = 0; i < levels; i++) {
     bids.push(Math.max(0.01, mid - spread / 2 - i * tick));
     asks.push(Math.min(0.99, mid + spread / 2 + i * tick));
   }
@@ -213,8 +214,8 @@ async function absorbUserCrossingAndPartialOrders({
       sizeRemaining: { $gt: 1e-9 },
     })
   )
-    .sort({ updatedAt: 1 })
-    .limit(80)
+    .sort({ sizeRemaining: -1, updatedAt: 1 })
+    .limit(120)
     .lean();
 
   if (!userOrders.length) return { absorbed: 0 };
@@ -238,8 +239,6 @@ async function absorbUserCrossingAndPartialOrders({
     }
   };
 
-  const qBase = ob.quoteSizeUsdc ?? 50;
-  const maxTake = Math.max(5, Math.round(qBase * 100) / 100);
   let absorbed = 0;
 
   const basePayload = {
@@ -261,37 +260,41 @@ async function absorbUserCrossingAndPartialOrders({
     const bookPrices = await bookPricesFor(o.optionKey, side);
     const crossing = isCrossingOrder(o, bookPrices);
     const partial = st === 'partially_filled';
-    if (!crossing && !partial) continue;
+    const isMarket = String(o.orderKind || '').toLowerCase() === 'market';
+    if (!crossing && !partial && !isMarket) continue;
 
     const mmDirection = o.direction === 'buy' ? 'sell' : 'buy';
-    const isMarketRemainder = partial || crossing || String(o.orderKind || '').toLowerCase() === 'market';
-    const takeSize = isMarketRemainder ? remaining : Math.min(remaining, maxTake);
-    if (takeSize <= 1e-9) continue;
+    let takeRemaining = remaining;
 
-    try {
-      await placeOrder({
-        ...basePayload,
-        optionKey: o.optionKey,
-        side: o.side,
-        direction: mmDirection,
-        orderKind: 'market',
-        size: takeSize,
-        slippageBps: 200,
-        isMarketMaker: true,
-      });
-      absorbed += 1;
-    } catch (e) {
-      if (e?.code === 'INSUFFICIENT_VAULT' || isInsufficientSharesError(e)) {
-        console.warn(
-          '[marketMakerQuotes] absorb skip (balance)',
-          chainMarketId,
-          o.optionKey,
-          o.side,
-          e.message
-        );
-        continue;
+    for (let pass = 0; pass < 5 && takeRemaining > 1e-9; pass += 1) {
+      try {
+        await placeOrder({
+          ...basePayload,
+          optionKey: o.optionKey,
+          side: o.side,
+          direction: mmDirection,
+          orderKind: 'market',
+          size: takeRemaining,
+          slippageBps: Math.max(200, Number(ob.maxSlippageBps) || 300),
+          isMarketMaker: true,
+        });
+        absorbed += 1;
+        const fresh = await Order.findById(o._id).select('sizeRemaining').lean();
+        takeRemaining = Number(fresh?.sizeRemaining) || 0;
+      } catch (e) {
+        if (e?.code === 'INSUFFICIENT_VAULT' || isInsufficientSharesError(e)) {
+          console.warn(
+            '[marketMakerQuotes] absorb skip (balance)',
+            chainMarketId,
+            o.optionKey,
+            o.side,
+            e.message
+          );
+          break;
+        }
+        console.warn('[marketMakerQuotes] absorb', chainMarketId, o._id, e.message || e);
+        break;
       }
-      console.warn('[marketMakerQuotes] absorb', chainMarketId, o._id, e.message || e);
     }
   }
 
@@ -358,22 +361,23 @@ async function ensureMinBookDepth({
   spreadMult,
   quoteMult,
 }) {
+  const levelCount = mmLevelCountForSide(doc, optionKey, side, quoteMult);
   const book = await getBook(chainMarketId, optionKey, side);
   const bidCount = book.bids?.length || 0;
   const askCount = book.asks?.length || 0;
-  const needBids = bidCount < LEVELS;
-  const needAsks = !pauseNewBuys && askCount < LEVELS;
+  const needBids = bidCount < levelCount;
+  const needAsks = !pauseNewBuys && askCount < levelCount;
   if (!needBids && !needAsks) return 0;
 
   const spreadBps = (ob.spreadBps ?? 80) * spreadMult;
   const mid = midForOutcome(doc, optionKey, side);
-  const { bids, asks } = buildLevelPrices({ ...ob, spreadBps }, mid);
+  const { bids, asks } = buildLevelPrices({ ...ob, spreadBps }, mid, levelCount);
   const { bidSizes, askSizes } = mmLevelSizesForSide(doc, optionKey, side, bids, asks, quoteMult);
 
   let placed = 0;
 
-  for (let i = bidCount; i < LEVELS; i++) {
-    const bidPx = bids[Math.min(i, LEVELS - 1)];
+  for (let i = bidCount; i < levelCount; i++) {
+    const bidPx = bids[Math.min(i, bids.length - 1)];
     const q = bidSizes[i] ?? bidSizes[bidSizes.length - 1] ?? 1;
     const hasBuy = await hasOpenMmQuoteAt({
       chainMarketId,
@@ -397,8 +401,8 @@ async function ensureMinBookDepth({
     }
   }
 
-  for (let i = askCount; i < LEVELS && !pauseNewBuys; i++) {
-    const askPx = asks[Math.min(i, LEVELS - 1)];
+  for (let i = askCount; i < levelCount && !pauseNewBuys; i++) {
+    const askPx = asks[Math.min(i, asks.length - 1)];
     const q = askSizes[i] ?? askSizes[askSizes.length - 1] ?? 1;
     const hasSell = await hasOpenMmQuoteAt({
       chainMarketId,
@@ -479,6 +483,7 @@ async function trimMmQuotesToVolumeCap({ chainMarketId, mmWalletLower, doc, opti
   const sideVol = sideVolumeUsdc(doc, optionKey, side);
   const maxBidNotional = sideVol / 2;
   const maxAskNotional = sideVol / 2;
+  const maxLevels = mmLevelCountForSide(doc, optionKey, side);
 
   for (const [direction, cap] of [
     ['buy', maxBidNotional],
@@ -500,14 +505,14 @@ async function trimMmQuotesToVolumeCap({ chainMarketId, mmWalletLower, doc, opti
       .sort(sort)
       .lean();
 
-    if (orders.length > LEVELS) {
-      for (const o of orders.slice(LEVELS)) {
+    if (orders.length > maxLevels) {
+      for (const o of orders.slice(maxLevels)) {
         await Order.updateOne(
           { _id: o._id },
           { $set: { status: 'cancelled', reservedCollateral: 0, sizeRemaining: 0 } }
         );
       }
-      orders = orders.slice(0, LEVELS);
+      orders = orders.slice(0, maxLevels);
     }
 
     let notional = orders.reduce(
@@ -759,12 +764,13 @@ async function ensureQuotesForDoc(doc, kind) {
       const widen = side === 'YES' ? yesWiden : noWiden;
       const spreadMult = widen ? 2.5 : 1;
       const quoteMult = widen ? 0.4 : 1;
+      const levelCount = mmLevelCountForSide(doc, optionKey, side, quoteMult);
       const spreadBps = (ob.spreadBps ?? 80) * spreadMult;
       const mid = midForOutcome(doc, optionKey, side);
-      const { bids, asks } = buildLevelPrices({ ...ob, spreadBps }, mid);
+      const { bids, asks } = buildLevelPrices({ ...ob, spreadBps }, mid, levelCount);
       const { bidSizes, askSizes } = mmLevelSizesForSide(doc, optionKey, side, bids, asks, quoteMult);
 
-      for (let i = 0; i < LEVELS; i++) {
+      for (let i = 0; i < levelCount; i++) {
         const bidPx = bids[i];
         const qBid = bidSizes[i] ?? 1;
         const hasBuy = await hasOpenMmQuoteAt({
@@ -789,7 +795,7 @@ async function ensureQuotesForDoc(doc, kind) {
       }
 
       if (!pauseNewBuys) {
-        for (let i = 0; i < LEVELS; i++) {
+        for (let i = 0; i < levelCount; i++) {
           const askPx = asks[i];
           const qAsk = askSizes[i] ?? 1;
           const hasSell = await hasOpenMmQuoteAt({
