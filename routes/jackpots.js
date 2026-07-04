@@ -13,193 +13,18 @@ const Prediction = require('../models/Prediction');
 const Match = require('../models/Match');
 const Poll = require('../models/Poll');
 const Cup = require('../models/Cup');
-const { reserveTx, finalizeTx } = require('../utils/processedTx');
 const {
   readJackpotBalanceOnChain,
   setJackpotBalanceOnChain,
 } = require('../utils/jackpotOnChainSync');
+const { verifyJackpotWithdrawReceipt } = require('../utils/verifyClaimReceipt');
 const {
-  verifyJackpotWithdrawReceipt,
-  findRecentJackpotWithdrawals,
-} = require('../utils/verifyClaimReceipt');
-
-const JACKPOT_CLAIM_LOCK_MS = 35 * 60 * 1000;
-const AMOUNT_MATCH_EPS = 0.000002;
-
-function amountsMatch(a, b) {
-  return Math.abs(Number(a) - Number(b)) <= AMOUNT_MATCH_EPS;
-}
-
-/**
- * Finalize DB after verified on-chain jackpot withdraw.
- */
-async function finalizeJackpotClaimInDb({ userId, predictionId, withdrawAmount, txHash }) {
-  if (txHash && String(txHash).trim()) {
-    const { reserved } = await reserveTx('jackpot_withdraw', txHash, {
-      user: userId,
-      predictionId: String(predictionId),
-      amount: withdrawAmount,
-    });
-    if (!reserved) {
-      const fresh = await User.findById(userId);
-      const pred = await Prediction.findById(predictionId);
-      return {
-        alreadyProcessed: true,
-        remainingBalance: fresh?.jackpotBalance ?? 0,
-        totalWithdrawn: fresh?.jackpotWithdrawn ?? 0,
-        prediction: pred,
-      };
-    }
-  }
-
-  const updatedUser = await User.findOneAndUpdate(
-    { _id: userId, jackpotBalancePending: { $gte: withdrawAmount } },
-    {
-      $inc: { jackpotBalancePending: -withdrawAmount, jackpotWithdrawn: withdrawAmount },
-      $set: { jackpotWithdrawInProgress: false },
-    },
-    { new: true }
-  );
-  if (!updatedUser) {
-    const err = new Error(
-      'No pending jackpot reservation for this amount. Contact support if USDC was received.'
-    );
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const updatedPred = await Prediction.findOneAndUpdate(
-    { _id: predictionId, jackpotClaimed: { $ne: true } },
-    {
-      $set: {
-        jackpotClaimed: true,
-        jackpotClaimInProgress: false,
-        ...(txHash ? { jackpotClaimTxHash: String(txHash).trim() } : {}),
-      },
-    },
-    { new: true }
-  );
-  if (!updatedPred) {
-    const err = new Error('Jackpot already claimed for this prediction');
-    err.statusCode = 400;
-    throw err;
-  }
-
-  if (txHash && String(txHash).trim()) {
-    await finalizeTx('jackpot_withdraw', txHash, { 'meta.completed': true });
-  }
-
-  return {
-    alreadyProcessed: false,
-    withdrawn: withdrawAmount,
-    remainingBalance: updatedUser.jackpotBalance,
-    totalWithdrawn: updatedUser.jackpotWithdrawn,
-    prediction: updatedPred,
-  };
-}
-
-/**
- * If chain paid but confirm was missed, finalize instead of refunding pending balance.
- */
-async function tryRecoverStaleJackpotClaims(userId, walletAddress) {
-  const inProgress = await Prediction.find({
-    user: userId,
-    type: 'free',
-    jackpotClaimInProgress: true,
-    jackpotClaimed: { $ne: true },
-    jackpotPayout: { $gt: 0 },
-  }).lean();
-  if (!inProgress.length || !walletAddress) return false;
-
-  const recent = await findRecentJackpotWithdrawals(walletAddress);
-  let recovered = false;
-
-  for (const pred of inProgress) {
-    const amt = Number(pred.jackpotPayout) || 0;
-    const hit = recent.find((r) => amountsMatch(r.amountUsdc, amt));
-    if (!hit) continue;
-    try {
-      await verifyJackpotWithdrawReceipt({
-        txHash: hit.txHash,
-        walletAddress,
-        amountUsdc: amt,
-      });
-      await finalizeJackpotClaimInDb({
-        userId,
-        predictionId: pred._id,
-        withdrawAmount: amt,
-        txHash: hit.txHash,
-      });
-      recovered = true;
-    } catch (e) {
-      console.warn('tryRecoverStaleJackpotClaims:', e?.message || e);
-    }
-  }
-  return recovered;
-}
-
-async function releaseStaleJackpotReservation(userId) {
-  const user = await User.findById(userId).select(
-    'jackpotBalance jackpotBalancePending jackpotWithdrawLockedAt jackpotWithdrawInProgress'
-  );
-  if (!user || !(user.jackpotBalancePending > 0)) return;
-  const lockedAt = user.jackpotWithdrawLockedAt;
-  if (!lockedAt) return;
-  if (Date.now() - new Date(lockedAt).getTime() < JACKPOT_CLAIM_LOCK_MS) return;
-
-  const link = await WalletLink.findOne({ user: userId }).lean();
-  if (link?.walletAddress) {
-    const recovered = await tryRecoverStaleJackpotClaims(userId, link.walletAddress);
-    if (recovered) {
-      const fresh = await User.findById(userId).select('jackpotBalancePending').lean();
-      if (!(fresh?.jackpotBalancePending > 0)) return;
-    }
-
-    const onChain = await readJackpotBalanceOnChain(link.walletAddress);
-    const dbTotal =
-      (user.jackpotBalance || 0) + (user.jackpotBalancePending || 0);
-    if (onChain != null && onChain + 0.02 < dbTotal) {
-      // On-chain balance lower than DB — likely a withdraw happened; do not refund pending.
-      await User.updateOne(
-        { _id: userId },
-        { $set: { jackpotWithdrawInProgress: false } }
-      );
-      console.warn(
-        `jackpot stale lock user ${userId}: on-chain ${onChain} < db ${dbTotal}; skipping pending refund`
-      );
-      return;
-    }
-  }
-
-  const pending = user.jackpotBalancePending;
-  await User.updateOne(
-    { _id: userId },
-    {
-      $inc: { jackpotBalance: pending },
-      $set: { jackpotBalancePending: 0, jackpotWithdrawInProgress: false },
-    }
-  );
-  await Prediction.updateMany(
-    { user: userId, jackpotClaimInProgress: true, jackpotClaimed: { $ne: true } },
-    { $set: { jackpotClaimInProgress: false } }
-  );
-}
-
-async function rollbackJackpotReservation(userId, predictionId, amount) {
-  await User.updateOne(
-    { _id: userId },
-    {
-      $inc: { jackpotBalance: amount, jackpotBalancePending: -amount },
-      $set: { jackpotWithdrawInProgress: false },
-    }
-  );
-  if (predictionId) {
-    await Prediction.updateOne(
-      { _id: predictionId },
-      { $set: { jackpotClaimInProgress: false } }
-    );
-  }
-}
+  finalizeJackpotClaimInDb,
+  rollbackJackpotReservation,
+  releaseStaleJackpotReservation,
+  releaseAllStaleJackpotLocks,
+  PREDICTION_CLAIM_LOCK_MS,
+} = require('../utils/jackpotClaimLocks');
 
 async function assertWalletLinkedToUser({ userId, walletAddress }) {
   let reqAddr;
@@ -727,6 +552,34 @@ router.get('/user/stats', auth, async (req, res) => {
   }
 });
 
+/** Release abandoned jackpot claim locks so the user can retry. */
+router.post('/claim/:predictionId/release-stale', auth, async (req, res) => {
+  try {
+    const prediction = await Prediction.findById(req.params.predictionId);
+    if (!prediction) return res.status(404).json({ message: 'Prediction not found' });
+    if (prediction.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    const result = await releaseAllStaleJackpotLocks(req.user._id, {
+      predictionId: prediction._id,
+    });
+    const fresh = await Prediction.findById(prediction._id);
+    res.json({
+      ok: true,
+      released: result.released,
+      recovered: result.recovered,
+      prediction: fresh,
+      canClaim:
+        fresh &&
+        !fresh.jackpotClaimed &&
+        !fresh.jackpotClaimInProgress &&
+        (Number(fresh.jackpotPayout) || 0) > 0,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 /**
  * Per-prediction free jackpot claim: reserves DB balance at sign time and checks on-chain cap.
  */
@@ -735,7 +588,7 @@ router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
   let predictionId = req.params.predictionId;
 
   try {
-    await releaseStaleJackpotReservation(req.user._id);
+    await releaseAllStaleJackpotLocks(req.user._id, { predictionId: req.params.predictionId });
 
     const { walletAddress } = req.body || {};
     if (!walletAddress) {
@@ -806,7 +659,14 @@ router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
       {
         _id: prediction._id,
         jackpotClaimed: { $ne: true },
-        jackpotClaimInProgress: { $ne: true },
+        $or: [
+          { jackpotClaimInProgress: { $ne: true } },
+          {
+            jackpotClaimInProgress: true,
+            jackpotClaimLockedAt: { $lt: new Date(Date.now() - PREDICTION_CLAIM_LOCK_MS) },
+          },
+          { jackpotClaimInProgress: true, jackpotClaimLockedAt: { $exists: false } },
+        ],
       },
       { $set: { jackpotClaimInProgress: true, jackpotClaimLockedAt: new Date() } },
       { new: true }

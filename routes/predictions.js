@@ -637,6 +637,13 @@ router.get('/match/:matchId/user', auth, async (req, res) => {
     if (!prediction) {
       return res.json(null);
     }
+    if (type === 'free') {
+      const { releaseAllStaleJackpotLocks } = require('../utils/jackpotClaimLocks');
+      await releaseAllStaleJackpotLocks(req.user._id, { predictionId: prediction._id });
+      const fresh = await Prediction.findById(prediction._id)
+        .populate('match', 'teamA teamB date status result isResolved');
+      return res.json(fresh || prediction);
+    }
     res.json(prediction);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -675,6 +682,13 @@ router.get('/poll/:pollId/user', auth, async (req, res) => {
     // Return null instead of 404 for better frontend handling
     if (!prediction) {
       return res.json(null);
+    }
+    if (type === 'free') {
+      const { releaseAllStaleJackpotLocks } = require('../utils/jackpotClaimLocks');
+      await releaseAllStaleJackpotLocks(req.user._id, { predictionId: prediction._id });
+      const fresh = await Prediction.findById(prediction._id)
+        .populate('poll', 'question type status result isResolved');
+      return res.json(fresh || prediction);
     }
     res.json(prediction);
   } catch (error) {
