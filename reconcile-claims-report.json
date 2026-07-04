@@ -1,55 +1,16 @@
 {
-  "generatedAt": "2026-07-03T20:44:26.746Z",
-  "mode": "dry-run",
-  "contractAddress": "0x05A675706187aD3eCA82F1F56596eaCFaBFE4447",
+  "generatedAt": "2026-07-04T04:13:58.922Z",
+  "mode": "apply",
+  "contractAddress": "0xf45e84635a2F7196eEef062D9e22013FaD762144",
   "jackpotWithdrawalSource": "C:\\Users\\HELLO\\Desktop\\startups\\SaveWRG\\backend\\jackpot-ledger-report.json",
   "summary": {
-    "jackpotUsersAdjusted": 93,
-    "jackpotPredictionsUpdated": 359,
-    "boostMarketPredictionsMarkedClaimed": 2,
-    "jackpotProcessedTxToRegister": 1052
+    "jackpotUsersAdjusted": 0,
+    "jackpotPredictionsUpdated": 0,
+    "boostMarketPredictionsMarkedClaimed": 0,
+    "jackpotProcessedTxToRegister": 1052,
+    "walletsOverWithdrawnOnChain": 59
   },
   "jackpotUsers": [
-    {
-      "userId": "69babffc157df8a442603d8b",
-      "username": "user_0xb9b4f3",
-      "wallet": "0xb9b4f325a15f5cb4ddcd6e12e42483aa20e7bf03",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.0019,
-        "jackpotWithdrawn": 0.0001,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "69bac45d157df8a442603f5e",
-      "username": "user_0x8f9057",
-      "wallet": "0x8f905761289a65413db491e6c35f48f8b3b9b6a9",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.001227,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
     {
       "userId": "69c4ca89c3fc808f5e9607c1",
       "username": "ThePredictor",
@@ -58,73 +19,13 @@
       "onChainWithdrawn": 12.729532,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.129945,
-        "jackpotWithdrawn": 7.529288,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.000257,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
         "jackpotWithdrawn": 2.000257,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "69c4cb24c3fc808f5e960936",
-      "username": "user_0xcbaf62",
-      "wallet": "0xcbaf626b037b67c5e86a272335b6d291d4b31a89",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.000407,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "69d4e687c35063dc84a5f2fe",
-      "username": "monnacheck",
-      "wallet": "0x13291fb0985e32e8d01488f6856f04c7e0a1535a",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 11.843617,
-        "jackpotWithdrawn": 9,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "69d4eec1c35063dc84a5f4f1",
-      "username": "user_0xfebe4c",
-      "wallet": "0xfebe4c41efe7e4f67c0122cd04ca8912ca016b88",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.000307,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
@@ -134,81 +35,21 @@
       "userId": "69d635275d5ee4c7b6238b20",
       "username": "3hunnatheartist",
       "wallet": "0x351f4d3970910fb009bf3dc509a47f92eb73f7af",
-      "earned": 0,
+      "earned": 1.747949,
       "onChainWithdrawn": 11.600935,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.058333,
-        "jackpotWithdrawn": 6.200935,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.747949,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 1.747949,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "69e01061c8f4ab19fde44ec1",
-      "username": "newtesting",
-      "wallet": "0xfff64603d8834dfa065a891af10ea33268de2e88",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.000207,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "69fd44c7a5054c57ebdb4003",
-      "username": "user_0xc6d6b2",
-      "wallet": "0xc6d6b225c7b89814a5f426cf75e07defb7a30ffb",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 4.1,
-        "jackpotWithdrawn": 5,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a08956bdcbdd47f815c7906",
-      "username": "ice",
-      "wallet": "0x134176339859587f21840c8639c98000b015cb3a",
-      "earned": 3.567921,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 15.703754,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 3.567921,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 3
     },
     {
       "userId": "6a2d684eed4f866e346e882f",
@@ -218,8 +59,8 @@
       "onChainWithdrawn": 12.544478,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.0825,
-        "jackpotWithdrawn": 12.544478,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 0,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -234,20 +75,20 @@
       "userId": "6a315cbc7cbac7e3480c75c1",
       "username": "user_0x60c911",
       "wallet": "0x60c911a84c68e304545c97743312400e116f5fb0",
-      "earned": 29.442473,
+      "earned": 30.596934,
       "onChainWithdrawn": 204.070604,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.871223,
-        "jackpotWithdrawn": 204.070604,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 30.596934,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 29.442473,
+        "jackpotWithdrawn": 30.596934,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 8,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -259,7 +100,7 @@
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 5.489258,
+        "jackpotWithdrawn": 4.989258,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -267,47 +108,47 @@
         "jackpotWithdrawn": 4.989258,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 4,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a3d7a8b62ba758dcd9e898d",
       "username": "BitcoinMonkeys",
       "wallet": "0x096f1800755841d5fecae7b8c8484dce50274184",
-      "earned": 3.079125,
+      "earned": 3.857792,
       "onChainWithdrawn": 11.051071,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 9.6225,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 3.857792,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 3.079125,
+        "jackpotWithdrawn": 3.857792,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a3d7be662ba758dcda0762b",
       "username": "BTCSports",
       "wallet": "0xb553e617c67ecfe6c2ff6a921578c88c1c6c0c2f",
-      "earned": 5.481572,
+      "earned": 6.355546,
       "onChainWithdrawn": 11.40078,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 11.40078,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 6.355546,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 5.481572,
+        "jackpotWithdrawn": 6.355546,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 4,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -318,8 +159,8 @@
       "onChainWithdrawn": 7.545238,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 7.545238,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 3.345693,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -327,7 +168,7 @@
         "jackpotWithdrawn": 3.345693,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -339,7 +180,7 @@
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 11.767255,
+        "jackpotWithdrawn": 6.188922,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -347,48 +188,8 @@
         "jackpotWithdrawn": 6.188922,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 5,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a3da8160dbadcf433e7a2c2",
-      "username": "Bitcoin",
-      "wallet": null,
-      "earned": 1.1625,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.1625,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.1625,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a3def4a300b0f56b4709a68",
-      "username": "JungleSoccer",
-      "wallet": "0x06f1f1fb7ac95f9d37b423508c45c5718cb90d39",
-      "earned": 2.167696,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.167696,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.167696,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
     },
     {
       "userId": "6a3defa1300b0f56b470f710",
@@ -399,7 +200,7 @@
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 7.253051,
+        "jackpotWithdrawn": 2.298884,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -407,84 +208,44 @@
         "jackpotWithdrawn": 2.298884,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a3deff9300b0f56b47158b7",
-      "username": "PlayPenguin",
-      "wallet": "0x12de4dcc22fc51f1ae454fc7334ea4051fa29e71",
-      "earned": 1.609438,
-      "onChainWithdrawn": 0.870312,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0.870312,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739126,
-        "jackpotWithdrawn": 0.870312,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
     },
     {
       "userId": "6a3df06b300b0f56b471d5f7",
       "username": "Vantor",
       "wallet": "0x83e1293755ef0200f3450cf74a4b0d25756afcf9",
-      "earned": 3.666386,
+      "earned": 4.445053,
       "onChainWithdrawn": 18.628885,
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 11.876803,
+        "jackpotWithdrawn": 4.445053,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 3.666386,
+        "jackpotWithdrawn": 4.445053,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 4,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a3e5e051f5d615a26c77773",
       "username": "Leoben",
       "wallet": "0xb5488259cf7e1bcd118d7b5beffae0aefa6407fd",
-      "earned": 6.171018,
+      "earned": 6.546812,
       "onChainWithdrawn": 13.686311,
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 8.253518,
+        "jackpotWithdrawn": 6.546812,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 6.171018,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 4,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a3e73edd9bdcaf62a9e1b02",
-      "username": "brightonwiseman",
-      "wallet": "0x12b67e6561029f01edb1ef16dc94966582864c1d",
-      "earned": 0,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.0825,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 6.546812,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
@@ -498,8 +259,8 @@
       "onChainWithdrawn": 1,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.458333,
-        "jackpotWithdrawn": 1,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 0,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -508,126 +269,26 @@
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a3e803a4f278dfc07c1d70a",
-      "username": "Malcolm_Great",
-      "wallet": "0x71b43c6d6d080267a7ac751432288a04431be353",
-      "earned": 1.428571,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a3f44a2f41df176f5b5b5c1",
-      "username": "user_0x1f428f",
-      "wallet": "0x1f428f9f9de79c9a0cf09249da24ae36c7783246",
-      "earned": 4.812573,
-      "onChainWithdrawn": 4.421753,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 4.421753,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 4.421753,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a3fc711dc9a51140e3d80f8",
-      "username": "TaiwoJoseph(TaiwoJH)",
-      "wallet": "0x52c7ceb5d961bd81bac140e0c650be6f2a9e9386",
-      "earned": 1.428571,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a3fcb82dc9a51140e437843",
-      "username": "CryptoGaley",
-      "wallet": "0xe7a52671f9070a46d21636976bf05ffee5e12d30",
-      "earned": 1.428571,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a3fd0ffe86ba40ff9cff05d",
-      "username": "WEB33KING",
-      "wallet": "0xd3191125e2f14dab067f570fbc181a46627ccde2",
-      "earned": 1.466429,
-      "onChainWithdrawn": 1.466429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.466429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.466429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a3fd429e86ba40ff9d3ca71",
       "username": "ISRAEL💦",
       "wallet": "0xb5696d37db472bab6ba2b119089dad596fe37163",
-      "earned": 2.493054,
+      "earned": 4.145695,
       "onChainWithdrawn": 5.261787,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 1.753929,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 4.145695,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.493054,
+        "jackpotWithdrawn": 4.145695,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -638,8 +299,8 @@
       "onChainWithdrawn": 8.211112,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 9.134127,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 5.079568,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -647,687 +308,67 @@
         "jackpotWithdrawn": 5.079568,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 4,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a3fdfa4da4f74f8514e8259",
-      "username": "Snrjap",
-      "wallet": null,
-      "earned": 1.428571,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a3fe597da4f74f851560836",
-      "username": "TBlaze",
-      "wallet": "0x8b292461c90f86cc74a2a41e0e6cb1290ef4c6c8",
-      "earned": 1.736869,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.736869,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.736869,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a4014ee859eef0d70474b48",
-      "username": "Primejack",
-      "wallet": "0x386fd0def29758c50ce1d5e2c25712c10dcafc20",
-      "earned": 2.056869,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.056869,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.056869,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a40189d859eef0d704c1ce0",
-      "username": "Joelord107",
-      "wallet": null,
-      "earned": 1.624934,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.624934,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.624934,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4025d8c626aa2bc39055a5",
-      "username": "Melvin077302",
-      "wallet": "0x2fe2ad29b592bab0de38da92d8522fbc2cf898f9",
-      "earned": 3.661698,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 2.907077,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 3.661698,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 4
-    },
-    {
-      "userId": "6a403a0b5669581921be485a",
-      "username": "Onchain vibes",
-      "wallet": "0xe353be6ddd95c4276473cc9a83ff777ebb37d03c",
-      "earned": 0.874265,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a404b341a96bf51d72a648d",
-      "username": "Kemzy",
-      "wallet": "0x1351105d384d0fb74bd09add2b5ef7bf0fc21dfb",
-      "earned": 3.666386,
-      "onChainWithdrawn": 1.1625,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 2.911765,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.503886,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a404e231a96bf51d72dd603",
-      "username": "Degen016",
-      "wallet": "0x746d8d5d70decf6165d504ab1bef6bc3c25e5d53",
-      "earned": 6.339302,
-      "onChainWithdrawn": 5.011112,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.405175,
-        "jackpotWithdrawn": 3.934127,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.32819,
-        "jackpotWithdrawn": 5.011112,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4050411a96bf51d7304bad",
-      "username": "Micheal",
-      "wallet": "0x9ff779223415e611f5760106eb56bc055e600d16",
-      "earned": 2.368746,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.368746,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.368746,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a405542825c74e6ea8333c0",
-      "username": "DEALER",
-      "wallet": "0xf03213dba21fecd3498ebdb01742d65cf2d1c9c4",
-      "earned": 1.428571,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 8.086905,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.428571,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a405751825c74e6ea851775",
-      "username": "Danjohn",
-      "wallet": null,
-      "earned": 1.609438,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.609438,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.609438,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4059ed825c74e6ea87b388",
-      "username": "Penny",
-      "wallet": "0x53c2d78fc1dfe5ee4311ac2dca873e9e39d100cd",
-      "earned": 1.1625,
-      "onChainWithdrawn": 1.458333,
-      "overWithdrawnOnChain": true,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.620833,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a408f6e8330769043571c85",
-      "username": "Mercy",
-      "wallet": "0xb02593d2bc3fc9ccfcdb0ed297f292a94038ea65",
-      "earned": 0.982248,
-      "onChainWithdrawn": 0.591429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0.591429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.390819,
-        "jackpotWithdrawn": 0.591429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
     },
     {
       "userId": "6a408f9c83307690435722ef",
       "username": "Ladipoe",
       "wallet": "0xccf2448381f012809587dc3374a1f23089c9c678",
-      "earned": 1.857248,
+      "earned": 2.731223,
       "onChainWithdrawn": 2.924762,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 2.924762,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.731223,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.857248,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a408fd38330769043572938",
-      "username": "Nation",
-      "wallet": null,
-      "earned": 0.982248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 2.731223,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4099df952f26e3499aeefa",
-      "username": "Obot",
-      "wallet": "0x73dc2e91c852f3b0e135e10d3a5a7b9792dd828a",
-      "earned": 5.498737,
-      "onChainWithdrawn": 2.505556,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.003182,
-        "jackpotWithdrawn": 5.495556,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.993181,
-        "jackpotWithdrawn": 2.505556,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a409a87952f26e3499af60b",
-      "username": "Charles",
-      "wallet": "0x3982e8a4f65048f5fb4787f82212e387000c7db7",
-      "earned": 5.280177,
-      "onChainWithdrawn": 2.505556,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.34605,
-        "jackpotWithdrawn": 3.934127,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.774621,
-        "jackpotWithdrawn": 2.505556,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a409b9c952f26e3499affd8",
-      "username": "Dauduu",
-      "wallet": "0xd23c82999e6368b64c38b9735817412e7c458734",
-      "earned": 1.819391,
-      "onChainWithdrawn": 1.428571,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 1.428571,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 1.428571,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a40a7c648b39411edee7b30",
-      "username": "Saviour",
-      "wallet": "0xaeb4268b39aa2a31852e4d987f7e4e55e8c51795",
-      "earned": 2.340693,
-      "onChainWithdrawn": 1.458333,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 3.799762,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.88236,
-        "jackpotWithdrawn": 1.458333,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 2
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a40a8a948b39411edee845e",
       "username": "Timitola",
       "wallet": "0x5b756c588559df8fecd833f553131ebce96bb49d",
-      "earned": 3.668056,
+      "earned": 4.043849,
       "onChainWithdrawn": 5.011112,
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 3.668056,
+        "jackpotWithdrawn": 4.043849,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 3.668056,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a40a93848b39411edee8b14",
-      "username": "Emmanuel",
-      "wallet": "0x4a70eace773065699b70f8d4d4c541854da201ac",
-      "earned": 2.505556,
-      "onChainWithdrawn": 1.458333,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 3.963889,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.047223,
-        "jackpotWithdrawn": 1.458333,
+        "jackpotWithdrawn": 4.043849,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a40c0edf89ce48d426ade9e",
-      "username": "Matthew",
-      "wallet": "0x6798947e9a0f3600ef7397f58eaf09f954f49c50",
-      "earned": 2.787434,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 2.032813,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.787434,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a40febb8e69bc40ce94cd0e",
-      "username": "Webkenzo",
-      "wallet": "0x3c321811ab589abcffe769cdd6dbd15a5867b00e",
-      "earned": 3.298632,
-      "onChainWithdrawn": 1.1625,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 2.907812,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.136132,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a41231350006b4ad1d090f3",
-      "username": "Suiperb",
-      "wallet": "0x06b80ddbd2fbafece68a9bf018c306718c22fbe2",
-      "earned": 5.724001,
-      "onChainWithdrawn": 4.4,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 5.333182,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.324001,
-        "jackpotWithdrawn": 4.4,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a41243450006b4ad1d0b158",
-      "username": "Jrot8",
-      "wallet": null,
-      "earned": 3.867447,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 5.32578,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 3.867447,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a41243450006b4ad1d0b160",
-      "username": "ORACLE",
-      "wallet": "0x4aa177096bc9233a57fe982a846c7d0cf16c8058",
-      "earned": 3.178253,
-      "onChainWithdrawn": 1.1625,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 2.032813,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.015753,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a41427bf14a790eaff4b86f",
-      "username": "MartialMawuena",
-      "wallet": "0xe95fff85e99ca004a47b84fe65c809bc4e97434b",
-      "earned": 2.857143,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.857143,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.857143,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4146f3f14a790eaff531ca",
-      "username": "Billionsfc",
-      "wallet": "0xe67bc28f95d35d4c1783003c3fc1310c41ea66e9",
-      "earned": 2.660693,
-      "onChainWithdrawn": 2.660694,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.660693,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.660693,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a41529dd2d9ff659fa964c0",
-      "username": "Praisehd",
-      "wallet": "0xee2b021d1731197d03b21eba538eea6ef3633d95",
-      "earned": 1.55332,
-      "onChainWithdrawn": 1.458333,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 2.620833,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.094987,
-        "jackpotWithdrawn": 1.458333,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a415abdd2d9ff659faa4c2e",
-      "username": "Lawzbeatz",
-      "wallet": "0x19c1e3f9bd1983799910d0d696c6848fdda07729",
-      "earned": 4.74711,
-      "onChainWithdrawn": 4.747111,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 4.74711,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 4.74711,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a420ce2942cda9fc98d0642",
-      "username": "TakudzwaMikeZvoushe",
-      "wallet": "0x32adce0847a5e72af012c2b51628a59672a5e303",
-      "earned": 0.982248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a42a0d86d5bebd407ba80d2",
-      "username": "Zen",
-      "wallet": "0xf076cc2fe794e2f4edbfb23d9be34e9102ede414",
-      "earned": 0.982248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a42a7276d5bebd407bb32ec",
-      "username": "Javier",
-      "wallet": "0xc3cb5e017f21d61e4fc11fea40c9933b2270bbaa",
-      "earned": 1.857248,
-      "onChainWithdrawn": 1.857249,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.857248,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.857248,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a42aae96d5bebd407bbecb6",
       "username": "RamadhaniMadhan",
       "wallet": "0x49c33f0c9408736a751680f1c5756a4d1f07f582",
-      "earned": 2.791386,
+      "earned": 3.16718,
       "onChainWithdrawn": 122.994125,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.791386,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 3.16718,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.791386,
+        "jackpotWithdrawn": 3.16718,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -1338,8 +379,8 @@
       "onChainWithdrawn": 30.625,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.26582,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.26582,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -1347,67 +388,47 @@
         "jackpotWithdrawn": 1.26582,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a42adb2cf69e7157f293bad",
       "username": "EmakEnakgaul",
       "wallet": "0x7daf1105b42a73179538a9ac4b280f2da4e433e0",
-      "earned": 2.671742,
+      "earned": 3.545717,
       "onChainWithdrawn": 84.8625,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.671742,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 3.545717,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.671742,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a42ae49cf69e7157f29517d",
-      "username": "PurnaSarie",
-      "wallet": "0xc5788583663e30f6e7a0b8d8b60e40b52199a2a8",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 3.545717,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a42af18cf69e7157f296c30",
       "username": "ArieAbyan",
       "wallet": "0x548244d51ac9f5e714238e4a45d4dee1a68d0ade",
-      "earned": 1.944139,
+      "earned": 2.319933,
       "onChainWithdrawn": 82.5375,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.944139,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.319933,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.944139,
+        "jackpotWithdrawn": 2.319933,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -1418,8 +439,8 @@
       "onChainWithdrawn": 28.720296,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.261132,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.261132,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -1427,27 +448,27 @@
         "jackpotWithdrawn": 1.261132,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a42b0a6cf69e7157f299acb",
       "username": "AyuAzzahra",
       "wallet": "0x68c222cac68d7a687fa0464f014976194a6761ac",
-      "earned": 1.650554,
+      "earned": 2.524528,
       "onChainWithdrawn": 11.848577,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.650554,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.524528,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.650554,
+        "jackpotWithdrawn": 2.524528,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -1458,8 +479,8 @@
       "onChainWithdrawn": 125.481228,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.423632,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.423632,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -1467,27 +488,27 @@
         "jackpotWithdrawn": 2.423632,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a42b21ccf69e7157f29cc53",
       "username": "AlbertAlbert",
       "wallet": "0x9299187c57c8fc24967448f9370d8856e064a4c6",
-      "earned": 1.901625,
+      "earned": 2.277419,
       "onChainWithdrawn": 83.7,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.901625,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.277419,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.901625,
+        "jackpotWithdrawn": 2.277419,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -1507,7 +528,7 @@
         "jackpotWithdrawn": 3.863494,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -1527,7 +548,7 @@
         "jackpotWithdrawn": 2.993182,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -1547,88 +568,8 @@
         "jackpotWithdrawn": 2.505556,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a42ccdc625ba77f259c10aa",
-      "username": "RozanYutreu",
-      "wallet": null,
-      "earned": 2.0375,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 2.0375,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.0375,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a42cf32625ba77f259c8101",
-      "username": "Robinson",
-      "wallet": "0xd12c126131cb7171df1ffe411afddff5075a8ee8",
-      "earned": 2.771938,
-      "onChainWithdrawn": 2.032812,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 2.032813,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739126,
-        "jackpotWithdrawn": 2.032812,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a42ff8d92826fb11f66127e",
-      "username": "Promisejohn",
-      "wallet": null,
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a42ff8d92826fb11f661285",
-      "username": "jongseong",
-      "wallet": null,
-      "earned": 0.875,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.875,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.875,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
     },
     {
       "userId": "6a43008a92826fb11f664fc1",
@@ -1638,8 +579,8 @@
       "onChainWithdrawn": 5.98,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 4.155682,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 5.301123,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -1647,308 +588,68 @@
         "jackpotWithdrawn": 5.301123,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 4,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43013c92826fb11f66743e",
-      "username": "Ghepie",
-      "wallet": "0x498ef37a26d4d821e767825280f186060e0c3f2a",
-      "earned": 2.890753,
-      "onChainWithdrawn": 1.745312,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.890753,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 1.745312,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4305320d12819e82f12a83",
-      "username": "user_0xbc1d3d",
-      "wallet": "0xbc1d3d3458f941e6bc70bf0a1568a515027a6f82",
-      "earned": 2.993182,
-      "onChainWithdrawn": 2.9,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.093182,
-        "jackpotWithdrawn": 2.9,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.093182,
-        "jackpotWithdrawn": 2.9,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a432324a6ec90b317ded5ef",
-      "username": "Baobeiily",
-      "wallet": "0xd31ad0cf9496474b2f78e1194539331d620c8183",
-      "earned": 1.745312,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.745312,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.745312,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4365a3b1dc2dbb807bcf06",
-      "username": "Mike127",
-      "wallet": "0xde960c769d8c13310f2cbce023daca81172e7ed4",
-      "earned": 2.032813,
-      "onChainWithdrawn": 1.1625,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.032813,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.870313,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4373fdc48dc87cb74bd0cf",
-      "username": "Julia",
-      "wallet": "0x378748aa8c76b2ab8380449296d582f531d31e66",
-      "earned": 2.484438,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 1.745312,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 2.484438,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 3
-    },
-    {
-      "userId": "6a4374e9c48dc87cb74c00b8",
-      "username": "Rose",
-      "wallet": null,
-      "earned": 0.911429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a437623c48dc87cb74c3d69",
-      "username": "Warren",
-      "wallet": "0xf84163d68960b9d246d86eefb561ea1200da1032",
-      "earned": 0.982248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a437774c48dc87cb74c9140",
-      "username": "Master",
-      "wallet": "0xfb4a30094346b0b3d604d6f8c83172074966cc21",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a43785ec48dc87cb74cc4b7",
-      "username": "favour",
-      "wallet": "0x8d58943ea1851fb295ac869d73c7312390b0a573",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a43788bc48dc87cb74cca3c",
-      "username": "Dave",
-      "wallet": null,
-      "earned": 0.911429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a437e87a357b383a0ddb10a",
-      "username": "Shmurda",
-      "wallet": null,
-      "earned": 1.650554,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.650554,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.650554,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
     },
     {
       "userId": "6a43aa432a10c6a831e9a730",
       "username": "user_0x07beba",
       "wallet": "0x07beba32e8281b528f8f84b4125458c9b8ab262e",
-      "earned": 1.265084,
+      "earned": 2.043751,
       "onChainWithdrawn": 18.359565,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.043751,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.265084,
+        "jackpotWithdrawn": 2.043751,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43aaef2a10c6a831e9effc",
       "username": "user_0x571ae2",
       "wallet": "0x571ae2430ce6a9747400032f1abe7d40ed57443c",
-      "earned": 2.77589,
+      "earned": 3.151683,
       "onChainWithdrawn": 18.06177,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.61339,
-        "jackpotWithdrawn": 1.1625,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 3.151683,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.77589,
+        "jackpotWithdrawn": 3.151683,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43acb52a10c6a831ea5fb9",
       "username": "user_0x4a94aa",
       "wallet": "0x4a94aa0c32522ea46a1a93346718b38816f3c276",
-      "earned": 1.66605,
+      "earned": 2.444716,
       "onChainWithdrawn": 17.317151,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.66605,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.444716,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.66605,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43acc12a10c6a831ea654b",
-      "username": "UncleGreen",
-      "wallet": "0x3f3bd6c4ad02ecf8bb371d3ea1351adf676e03be",
-      "earned": 0.875,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.875,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.875,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 2.444716,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43ad25c3f12fb24039837f",
@@ -1958,8 +659,8 @@
       "onChainWithdrawn": 14.833935,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 1.1625,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.073929,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -1967,68 +668,48 @@
         "jackpotWithdrawn": 2.073929,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43ad88c3f12fb240399301",
       "username": "user_0x352749",
       "wallet": "0x35274921208c05312971f86c72cf41af62d2c657",
-      "earned": 1.786429,
+      "earned": 2.565095,
       "onChainWithdrawn": 27.671435,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.786429,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.565095,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.786429,
+        "jackpotWithdrawn": 2.565095,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43adffc3f12fb24039a955",
       "username": "user_0x39dbe1",
       "wallet": "0x39dbe1275351361bcc78f937af0b8f6723778c02",
-      "earned": 1.650554,
+      "earned": 2.524528,
       "onChainWithdrawn": 15.494293,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.650554,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.524528,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.650554,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43ae88c3f12fb24039c895",
-      "username": "Airdropking789",
-      "wallet": "0x088530d2990ee2823782b6398b1a3a7b7237d7e3",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 2.524528,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43aeadc3f12fb24039cf42",
@@ -2038,8 +719,8 @@
       "onChainWithdrawn": 12.760006,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 0.911429,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2047,147 +728,67 @@
         "jackpotWithdrawn": 0.911429,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43af2fc3f12fb24039e13e",
-      "username": "user_0xf81b52",
-      "wallet": "0xf81b5255298cb29cdddc9102c0c3a146dcb062fa",
-      "earned": 1.901625,
-      "onChainWithdrawn": 1.1625,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a43b88ac3f12fb2403b8e15",
-      "username": "Precious",
-      "wallet": "0xa6594ea9d880cb079d3172137bba682322315784",
-      "earned": 1.145441,
-      "onChainWithdrawn": 1.145441,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.145441,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.145441,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43b8d5c3f12fb2403b9fc0",
-      "username": "Julianpop",
-      "wallet": "0x580934a40e8d362af72831eddfe12a1e7e888141",
-      "earned": 2.144748,
-      "onChainWithdrawn": 1.753929,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 1.753929,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.390819,
-        "jackpotWithdrawn": 1.753929,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a43b95fc3f12fb2403bbc6a",
-      "username": "Wissy",
-      "wallet": "0x8e73f63f166c4a7c6c8ce04ffa6f5a522c3ccc55",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0.739125,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43bc00ec0935b012f72175",
       "username": "user_0x4f1a3a",
       "wallet": "0x4f1a3a6f52416acd421ea4ef0ddc96bf465e2e34",
-      "earned": 2.216362,
+      "earned": 2.995029,
       "onChainWithdrawn": 41.765397,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 1.461741,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.995029,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.216362,
+        "jackpotWithdrawn": 2.995029,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43bc8bec0935b012f72f0d",
       "username": "user_0x67b7fd",
       "wallet": "0x67b7fde319cdc6556a13153d2305e370db5086f3",
-      "earned": 0.874265,
+      "earned": 1.250058,
       "onChainWithdrawn": 13.98824,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.250058,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
+        "jackpotWithdrawn": 1.250058,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43bd04ec0935b012f74115",
       "username": "user_0xe78af8",
       "wallet": "0xe78af8150292eac52a5111691e60cf477b445f0d",
-      "earned": 0.870312,
+      "earned": 1.648979,
       "onChainWithdrawn": 32.201544,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.870312,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.648979,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.870312,
+        "jackpotWithdrawn": 1.648979,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -2198,8 +799,8 @@
       "onChainWithdrawn": 29.590608,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.609438,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.609438,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2207,27 +808,27 @@
         "jackpotWithdrawn": 1.609438,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43bed9ec0935b012f791c7",
       "username": "user_0xa60aeb",
       "wallet": "0xa60aeb71a444e5b4c569658160aec462445fd02d",
-      "earned": 0.870312,
+      "earned": 1.648979,
       "onChainWithdrawn": 30.46092,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.870312,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.648979,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.870312,
+        "jackpotWithdrawn": 1.648979,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -2238,8 +839,8 @@
       "onChainWithdrawn": 7.097148,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 0.982248,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2247,47 +848,47 @@
         "jackpotWithdrawn": 0.982248,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43c10dec0935b012f7e125",
       "username": "user_0xeba905",
       "wallet": "0xeba905b35a526714e13ff3cc43c988224fbf8825",
-      "earned": 2.204818,
+      "earned": 2.580612,
       "onChainWithdrawn": 4.397079,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 1.465693,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.580612,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.204818,
+        "jackpotWithdrawn": 2.580612,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43c186ec0935b012f7f77f",
       "username": "user_0xe80420",
       "wallet": "0xe804203117e93a22ac7503db17b1ad901191b69b",
-      "earned": 0.874265,
+      "earned": 2.622213,
       "onChainWithdrawn": 9.616915,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.622213,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
+        "jackpotWithdrawn": 2.622213,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -2298,8 +899,8 @@
       "onChainWithdrawn": 14.65693,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.204818,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.204818,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2307,128 +908,48 @@
         "jackpotWithdrawn": 2.204818,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43c298ec0935b012f83057",
       "username": "user_0xcd6403",
       "wallet": "0xcd6403483669a15798bf716df8446425f1c27a08",
-      "earned": 0.874265,
+      "earned": 1.748239,
       "onChainWithdrawn": 11.365445,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.748239,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43c31eec0935b012f84758",
-      "username": "user_0x3081b2",
-      "wallet": "0x3081b20d3b67fd8884f6fa1f24f34f0e653daa78",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
+        "jackpotWithdrawn": 1.748239,
         "jackpotBalancePending": 0
       },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a43c399ec0935b012f85c01",
       "username": "user_0x2be1fc",
       "wallet": "0x2be1fc2fe66b4f953323343a54c80cebd69f2542",
-      "earned": 2.056869,
+      "earned": 2.432663,
       "onChainWithdrawn": 10.937148,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 2.056869,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.432663,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.056869,
+        "jackpotWithdrawn": 2.432663,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a43c404ec0935b012f86e8f",
-      "username": "user_0x28d9a2",
-      "wallet": "0x28d9a21061de2a73696188761615aa76da1f784b",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a43c83aec0935b012f97ee4",
-      "username": "Noble",
-      "wallet": "0x75a5e7b616a90d39d9e6f89ea317b303b35866ac",
-      "earned": 2.771938,
-      "onChainWithdrawn": 1.1625,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 2.032813,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.609438,
-        "jackpotWithdrawn": 1.1625,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a43cc5242c96aa6a129bc4f",
-      "username": "Christian",
-      "wallet": "0x4bba1c80d7285e95f95240c76b9a9f30b4bf8f7b",
-      "earned": 1.466429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.466429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.466429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
     },
     {
       "userId": "6a4410bfc0f9208790abd1ab",
@@ -2447,7 +968,7 @@
         "jackpotWithdrawn": 1.466429,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -2458,8 +979,8 @@
       "onChainWithdrawn": 2.341429,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 1.466429,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.22105,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2467,7 +988,7 @@
         "jackpotWithdrawn": 2.22105,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -2478,8 +999,8 @@
       "onChainWithdrawn": 2.9565,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 0.739125,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2487,28 +1008,8 @@
         "jackpotWithdrawn": 0.739125,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a4417f218a088e3e351edc1",
-      "username": "Cheque",
-      "wallet": "0x2b84acdee14cf78782f9195027fe4ec84eb07b89",
-      "earned": 1.614125,
-      "onChainWithdrawn": 0.875,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0.875,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0.875,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
     },
     {
       "userId": "6a444931ccd7879a4ef5d45a",
@@ -2518,8 +1019,8 @@
       "onChainWithdrawn": 16.196329,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 0.911429,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.056869,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -2527,627 +1028,47 @@
         "jackpotWithdrawn": 2.056869,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 3,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a444a6fccd7879a4ef630dc",
       "username": "Fatima",
       "wallet": "0x233fe712842bfd64d4dd60779a755865cc3de269",
-      "earned": 1.461741,
+      "earned": 2.335715,
       "onChainWithdrawn": 4.664106,
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.461741,
+        "jackpotWithdrawn": 2.335715,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.461741,
+        "jackpotWithdrawn": 2.335715,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a444fdeccd7879a4ef81763",
-      "username": "William",
-      "wallet": "0x81afb9206efec7454381e56462ef64863da5d7f6",
-      "earned": 2.483702,
-      "onChainWithdrawn": 2.483702,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.483702,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 2.483702,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 3,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a4450dc1394d03ee3acc3f9",
-      "username": "Will",
-      "wallet": "0x50889e01450090827465f19a7052d0b58cf71fbf",
-      "earned": 1.744577,
-      "onChainWithdrawn": 1.744577,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.744577,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.744577,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 2,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a44592e1394d03ee3aedf43",
-      "username": "Willsid",
-      "wallet": null,
-      "earned": 0.870312,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.870312,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.870312,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a445ad61394d03ee3af54e3",
-      "username": "Vhaorb",
-      "wallet": null,
-      "earned": 1.624934,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.624934,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.624934,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4461ca93c08a1e73d3c11a",
-      "username": "Win",
-      "wallet": null,
-      "earned": 0.870312,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.870312,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.870312,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4462cd93c08a1e73d40a6b",
-      "username": "hen",
-      "wallet": null,
-      "earned": 0.754621,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44679093c08a1e73d5252b",
-      "username": "Chat",
-      "wallet": null,
-      "earned": 1.34605,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.34605,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.34605,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a44b3643dfa1fcb280cb8ec",
-      "username": "Big win",
-      "wallet": "0x3104c46283cc84420a5158194d05245bda98589a",
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.591429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44b4253dfa1fcb280ce881",
-      "username": "Esther",
-      "wallet": "0xebf550876cc1f0957da3d5e4846aa5cdbfd6b170",
-      "earned": 1.330554,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0.591429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.330554,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a44b4943dfa1fcb280d0442",
-      "username": "Udoma",
-      "wallet": null,
-      "earned": 0.739125,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44c06b4949a2451a02f20e",
-      "username": "Melvin",
-      "wallet": "0x9af6997ac8232779d021ac796dd00737e119fa1b",
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.591429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44c13c4949a2451a032777",
-      "username": "Peace",
-      "wallet": "0xb1ec3068fcc8e6272a279fb1dc79763d8c35f7c1",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44d718e795bb078bba8571",
-      "username": "Vin",
-      "wallet": null,
-      "earned": 0.911429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44d7e5e795bb078bbaab54",
-      "username": "Jerry",
-      "wallet": "0xe6466d557a705608d935d48883b1efc848ee1816",
-      "earned": 1.302248,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.390819,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44d84be795bb078bbac7e6",
-      "username": "Praise",
-      "wallet": "0x57999fa2f9d7aaede4aa7bad70c94db3d587d52a",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0.39082,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.39082,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.39082,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a44e59b6cad0728d25b9a23",
-      "username": "Mercy47",
-      "wallet": "0x3345e796612af79424e74f9fc4fdf5cd4a492161",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0.39082,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.39082,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.39082,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a44e9866cad0728d25c3007",
-      "username": "Mira",
-      "wallet": null,
-      "earned": 0.754621,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a44f0de1e403dc430391b32",
-      "username": "Grace",
-      "wallet": "0x59c3ce13d516b14c427fcf194f9760eb9d59f0a2",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0.739125,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a44fa451e403dc4303ad626",
-      "username": "Benzo",
-      "wallet": "0x41315dd0b664c5a879a0d7c3bf50fbe16ef0801d",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a4507eaebdced70605b93a1",
-      "username": "Hag",
-      "wallet": null,
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4508c6ebdced70605ba701",
-      "username": "Hay",
-      "wallet": null,
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4509c2ebdced70605bca68",
-      "username": "Bath",
-      "wallet": null,
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a450bd7ebdced70605c41aa",
-      "username": "Long",
-      "wallet": "0xf92b39b644648689ae8433023f5893ec19010c8d",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a450c83ebdced70605c65fb",
-      "username": "Smart",
-      "wallet": "0xbc085dfe89fde5cb5e6878dd2bf1b209beaf9338",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a450d7eebdced70605c9723",
-      "username": "Alex",
-      "wallet": "0xdfc7acb1a73d5d5b89f81c1e789cbce8e430357e",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a4513cdebdced70605da661",
-      "username": "Sunny",
-      "wallet": "0x8ef0d7aa9a18517c2e502cb999d84f43c6b34c42",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a451533d9cef978ae3039fe",
-      "username": "Olu",
-      "wallet": "0xa68cdb82267c68c4cff735252ba1d580b1a5738b",
-      "earned": 0.911429,
-      "onChainWithdrawn": 0.911429,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.911429,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a451712d9cef978ae30df59",
-      "username": "Fikro",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a452195d9cef978ae333388",
-      "username": "Fargos",
-      "wallet": null,
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
     },
     {
       "userId": "6a4526f6024740754aa9e7a9",
       "username": "Sanchez001",
       "wallet": "0x3d1b3c07e56607734ebf5b5161092ece7400ce6f",
-      "earned": 1.66605,
+      "earned": 2.444716,
       "onChainWithdrawn": 10.309916,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0.911429,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.444716,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.66605,
+        "jackpotWithdrawn": 2.444716,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -3158,8 +1079,8 @@
       "onChainWithdrawn": 3.695625,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 0.739125,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -3167,47 +1088,27 @@
         "jackpotWithdrawn": 0.739125,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a452775024740754aaa0e9d",
-      "username": "Antics",
-      "wallet": null,
-      "earned": 0.982248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.982248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a45347921cf1e65ff053e57",
       "username": "Rabeka",
       "wallet": "0x5d26334265189c62a370247e8db2983c2b8b75bc",
-      "earned": 1.330554,
+      "earned": 2.204528,
       "onChainWithdrawn": 3.400233,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0.591429,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.204528,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.330554,
+        "jackpotWithdrawn": 2.204528,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
     },
     {
@@ -3218,8 +1119,8 @@
       "onChainWithdrawn": 3.609913,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0.591429,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 1.34605,
         "jackpotBalancePending": 0
       },
       "after": {
@@ -3227,228 +1128,28 @@
         "jackpotWithdrawn": 1.34605,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45357221cf1e65ff0591a4",
-      "username": "Rjdhddh",
-      "wallet": null,
-      "earned": 0.591429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.591429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45454328cfc688c47174eb",
-      "username": "Elanpeach",
-      "wallet": null,
-      "earned": 1.302248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a45483c28cfc688c471de62",
-      "username": "Boutf",
-      "wallet": null,
-      "earned": 1.302248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a4548c828cfc688c471f9c9",
-      "username": "Gbffxff",
-      "wallet": null,
-      "earned": 1.302248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a45496d28cfc688c4721dbf",
-      "username": "Xjdjehdbdh",
-      "wallet": null,
-      "earned": 1.302248,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a456d96e385de9ad85c2001",
-      "username": "Favour",
-      "wallet": null,
-      "earned": 1.265084,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a456deee385de9ad85c4305",
-      "username": "JamesMadison",
-      "wallet": null,
-      "earned": 0.911429,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.911429,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
     },
     {
       "userId": "6a456e28e385de9ad85c5ecc",
       "username": "Abdul60",
       "wallet": "0x02871d31f0895e38fdedbf053c63e2259706120f",
-      "earned": 1.302248,
+      "earned": 2.080915,
       "onChainWithdrawn": 44.00962,
       "overWithdrawnOnChain": true,
       "before": {
-        "jackpotBalance": 1.302248,
-        "jackpotWithdrawn": 0,
+        "jackpotBalance": 0,
+        "jackpotWithdrawn": 2.080915,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.302248,
+        "jackpotWithdrawn": 2.080915,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a456e86e385de9ad85c799f",
-      "username": "Sugar50001",
-      "wallet": "0xb1fff8b69134ab03a687b92cccae7b1f03d4fa83",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a456f04e385de9ad85c922f",
-      "username": "AdamaTorres",
-      "wallet": null,
-      "earned": 0.874265,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a456f60e385de9ad85cb22b",
-      "username": "MemeLord",
-      "wallet": null,
-      "earned": 1.265084,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
     },
     {
       "userId": "6a45703ce385de9ad85cf1b7",
@@ -3467,526 +1168,40 @@
         "jackpotWithdrawn": 0.911429,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45706fe385de9ad85d06c0",
-      "username": "MasterGreen",
-      "wallet": null,
-      "earned": 1.265084,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
       "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
+      "predictionsMarkedUnclaimed": 0
     },
     {
       "userId": "6a457154e385de9ad85d5b2f",
       "username": "Abdullahi",
       "wallet": "0xb94d036fc95e9280e98843f5c1409252177d3744",
-      "earned": 1.650554,
+      "earned": 2.42922,
       "onChainWithdrawn": 2.734287,
       "overWithdrawnOnChain": true,
       "before": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.650554,
+        "jackpotWithdrawn": 2.42922,
         "jackpotBalancePending": 0
       },
       "after": {
         "jackpotBalance": 0,
-        "jackpotWithdrawn": 1.650554,
+        "jackpotWithdrawn": 2.42922,
         "jackpotBalancePending": 0
       },
-      "predictionsMarkedClaimed": 2,
+      "predictionsMarkedClaimed": 0,
       "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a457326e385de9ad85dd834",
-      "username": "John",
-      "wallet": "0xb364d34290ccc18de3e3ea5b1de36884361e9458",
-      "earned": 0.874265,
-      "onChainWithdrawn": 0.874265,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a457523e385de9ad85e4fe9",
-      "username": "Stella",
-      "wallet": null,
-      "earned": 0.874265,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4592236fcd2dce2bf7cd4e",
-      "username": "Judy",
-      "wallet": null,
-      "earned": 1.265084,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.265084,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a45958c6fcd2dce2bf86a4e",
-      "username": "Josh",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a459795a889b5686de56c33",
-      "username": "Ada",
-      "wallet": "0x6d8be54b178fde10fea25608632ffcd641ab7e8f",
-      "earned": 0.874265,
-      "onChainWithdrawn": 0.874265,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a459951a889b5686de5b74e",
-      "username": "Glow",
-      "wallet": "0xfa7cea3ab4448e18ceeac9f48245acadac356302",
-      "earned": 0.874265,
-      "onChainWithdrawn": 0.874265,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45a424a889b5686de88205",
-      "username": "Vine",
-      "wallet": "0xfce7afddc75c63f3d9b804d2d368032b0fdbb4af",
-      "earned": 0.874265,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.874265,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45a5a6795ebbd525702155",
-      "username": "Stalla",
-      "wallet": "0x98cdcf9e1dd9e96d78a26dbf084bdbf2c0fbeec4",
-      "earned": 0.874265,
-      "onChainWithdrawn": 0.874265,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.874265,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45a9d7795ebbd525716740",
-      "username": "Ability55",
-      "wallet": "0x70a03c9669614ee09f9b71d5657abc5b29c7dd9b",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45ab9c795ebbd52571ee03",
-      "username": "Wizzy55",
-      "wallet": "0x0cd872192381bd862d130fe49909ef4d07f8235a",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45ad6f795ebbd52572a3ea",
-      "username": "Bessey",
-      "wallet": "0x1a7ceb7e320411ecd706e10ee7c3ad15b0082fda",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0.739125,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45aebc795ebbd525732069",
-      "username": "Felex66",
-      "wallet": "0xd89247e2ca2184954da14baa7c604d71daf45aa3",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0.739125,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45b5a0b6710b5786aabf2f",
-      "username": "Joel",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45b63cb6710b5786ab1848",
-      "username": "Victor",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45bb5fb6710b5786ad0717",
-      "username": "Military",
-      "wallet": "0xd3d97c5c98c0eaa6edfed65ca8ae095069c76890",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0.739125,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45bcf3b6710b5786ad68d4",
-      "username": "Jos",
-      "wallet": "0x781373d60a48fc1d68e70c518f742829ee6cd543",
-      "earned": 0.739125,
-      "onChainWithdrawn": 0.739125,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.739125,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0,
-        "jackpotWithdrawn": 0.739125,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 1,
-      "predictionsMarkedUnclaimed": 0
-    },
-    {
-      "userId": "6a45be4db6710b5786add896",
-      "username": "Paul",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a45ed54b78948160b5e2762",
-      "username": "Ruth",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4664850f37c3c56ca1bdc5",
-      "username": "user_0x666638",
-      "wallet": "0x666638f1fa90945dbf9ebb514180a3eb2de6d36d",
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a4695c74e546cd39bcf27e8",
-      "username": "Vibesnord",
-      "wallet": "0x84c16c01e82e783d899d459faab6a92781071f7a",
-      "earned": 1.145441,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 1.145441,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 2
-    },
-    {
-      "userId": "6a46976d4e546cd39bcf6c69",
-      "username": "Moses59",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a469831907b520aa78d0f04",
-      "username": "Wisdon",
-      "wallet": null,
-      "earned": 0.39082,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.39082,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
-    },
-    {
-      "userId": "6a469a42907b520aa78d5c98",
-      "username": "Florence",
-      "wallet": "0xf4235cbc630fcbb78202d412da34514aa106ffe5",
-      "earned": 0.754621,
-      "onChainWithdrawn": 0,
-      "overWithdrawnOnChain": false,
-      "before": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "after": {
-        "jackpotBalance": 0.754621,
-        "jackpotWithdrawn": 0,
-        "jackpotBalancePending": 0
-      },
-      "predictionsMarkedClaimed": 0,
-      "predictionsMarkedUnclaimed": 1
     }
   ],
-  "boostMarketClaims": [
-    {
-      "predictionId": "6a458ea96fcd2dce2bf6ad6b",
-      "type": "boost",
-      "payout": 1.703595,
-      "wallet": "0x233fE712842BFd64D4DD60779A755865cC3de269",
-      "markedClaimed": true,
-      "channel": "amm_boost"
-    },
-    {
-      "predictionId": "6a4591a56fcd2dce2bf7a039",
-      "type": "boost",
-      "payout": 2.555392,
-      "wallet": "0xd425dC079B558298d9c5d2824fd82E57cbef1A99",
-      "markedClaimed": true,
-      "channel": "amm_boost"
-    }
-  ]
+  "boostMarketClaims": [],
+  "locksCleared": {
+    "usersModified": 0,
+    "predictionsModified": 0
+  },
+  "processedTx": {
+    "inserted": 365,
+    "skipped": 687
+  },
+  "onChainJackpotSync": {
+    "error": "Invalid payout amount"
+  }
 }
