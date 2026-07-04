@@ -18,17 +18,158 @@ const {
   readJackpotBalanceOnChain,
   setJackpotBalanceOnChain,
 } = require('../utils/jackpotOnChainSync');
+const {
+  verifyJackpotWithdrawReceipt,
+  findRecentJackpotWithdrawals,
+} = require('../utils/verifyClaimReceipt');
 
 const JACKPOT_CLAIM_LOCK_MS = 35 * 60 * 1000;
+const AMOUNT_MATCH_EPS = 0.000002;
+
+function amountsMatch(a, b) {
+  return Math.abs(Number(a) - Number(b)) <= AMOUNT_MATCH_EPS;
+}
+
+/**
+ * Finalize DB after verified on-chain jackpot withdraw.
+ */
+async function finalizeJackpotClaimInDb({ userId, predictionId, withdrawAmount, txHash }) {
+  if (txHash && String(txHash).trim()) {
+    const { reserved } = await reserveTx('jackpot_withdraw', txHash, {
+      user: userId,
+      predictionId: String(predictionId),
+      amount: withdrawAmount,
+    });
+    if (!reserved) {
+      const fresh = await User.findById(userId);
+      const pred = await Prediction.findById(predictionId);
+      return {
+        alreadyProcessed: true,
+        remainingBalance: fresh?.jackpotBalance ?? 0,
+        totalWithdrawn: fresh?.jackpotWithdrawn ?? 0,
+        prediction: pred,
+      };
+    }
+  }
+
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: userId, jackpotBalancePending: { $gte: withdrawAmount } },
+    {
+      $inc: { jackpotBalancePending: -withdrawAmount, jackpotWithdrawn: withdrawAmount },
+      $set: { jackpotWithdrawInProgress: false },
+    },
+    { new: true }
+  );
+  if (!updatedUser) {
+    const err = new Error(
+      'No pending jackpot reservation for this amount. Contact support if USDC was received.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const updatedPred = await Prediction.findOneAndUpdate(
+    { _id: predictionId, jackpotClaimed: { $ne: true } },
+    {
+      $set: {
+        jackpotClaimed: true,
+        jackpotClaimInProgress: false,
+        ...(txHash ? { jackpotClaimTxHash: String(txHash).trim() } : {}),
+      },
+    },
+    { new: true }
+  );
+  if (!updatedPred) {
+    const err = new Error('Jackpot already claimed for this prediction');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (txHash && String(txHash).trim()) {
+    await finalizeTx('jackpot_withdraw', txHash, { 'meta.completed': true });
+  }
+
+  return {
+    alreadyProcessed: false,
+    withdrawn: withdrawAmount,
+    remainingBalance: updatedUser.jackpotBalance,
+    totalWithdrawn: updatedUser.jackpotWithdrawn,
+    prediction: updatedPred,
+  };
+}
+
+/**
+ * If chain paid but confirm was missed, finalize instead of refunding pending balance.
+ */
+async function tryRecoverStaleJackpotClaims(userId, walletAddress) {
+  const inProgress = await Prediction.find({
+    user: userId,
+    type: 'free',
+    jackpotClaimInProgress: true,
+    jackpotClaimed: { $ne: true },
+    jackpotPayout: { $gt: 0 },
+  }).lean();
+  if (!inProgress.length || !walletAddress) return false;
+
+  const recent = await findRecentJackpotWithdrawals(walletAddress);
+  let recovered = false;
+
+  for (const pred of inProgress) {
+    const amt = Number(pred.jackpotPayout) || 0;
+    const hit = recent.find((r) => amountsMatch(r.amountUsdc, amt));
+    if (!hit) continue;
+    try {
+      await verifyJackpotWithdrawReceipt({
+        txHash: hit.txHash,
+        walletAddress,
+        amountUsdc: amt,
+      });
+      await finalizeJackpotClaimInDb({
+        userId,
+        predictionId: pred._id,
+        withdrawAmount: amt,
+        txHash: hit.txHash,
+      });
+      recovered = true;
+    } catch (e) {
+      console.warn('tryRecoverStaleJackpotClaims:', e?.message || e);
+    }
+  }
+  return recovered;
+}
 
 async function releaseStaleJackpotReservation(userId) {
   const user = await User.findById(userId).select(
-    'jackpotBalancePending jackpotWithdrawLockedAt jackpotWithdrawInProgress'
+    'jackpotBalance jackpotBalancePending jackpotWithdrawLockedAt jackpotWithdrawInProgress'
   );
   if (!user || !(user.jackpotBalancePending > 0)) return;
   const lockedAt = user.jackpotWithdrawLockedAt;
   if (!lockedAt) return;
   if (Date.now() - new Date(lockedAt).getTime() < JACKPOT_CLAIM_LOCK_MS) return;
+
+  const link = await WalletLink.findOne({ user: userId }).lean();
+  if (link?.walletAddress) {
+    const recovered = await tryRecoverStaleJackpotClaims(userId, link.walletAddress);
+    if (recovered) {
+      const fresh = await User.findById(userId).select('jackpotBalancePending').lean();
+      if (!(fresh?.jackpotBalancePending > 0)) return;
+    }
+
+    const onChain = await readJackpotBalanceOnChain(link.walletAddress);
+    const dbTotal =
+      (user.jackpotBalance || 0) + (user.jackpotBalancePending || 0);
+    if (onChain != null && onChain + 0.02 < dbTotal) {
+      // On-chain balance lower than DB — likely a withdraw happened; do not refund pending.
+      await User.updateOne(
+        { _id: userId },
+        { $set: { jackpotWithdrawInProgress: false } }
+      );
+      console.warn(
+        `jackpot stale lock user ${userId}: on-chain ${onChain} < db ${dbTotal}; skipping pending refund`
+      );
+      return;
+    }
+  }
 
   const pending = user.jackpotBalancePending;
   await User.updateOne(
@@ -731,7 +872,11 @@ router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
 /** Confirm on-chain jackpot claim after successful tx. */
 router.post('/claim/:predictionId/confirm', auth, async (req, res) => {
   try {
-    const { txHash } = req.body || {};
+    const { txHash, walletAddress } = req.body || {};
+    if (!txHash || !String(txHash).trim()) {
+      return res.status(400).json({ message: 'txHash is required' });
+    }
+
     const prediction = await Prediction.findById(req.params.predictionId);
     if (!prediction) {
       return res.status(404).json({ message: 'Prediction not found' });
@@ -748,69 +893,48 @@ router.post('/claim/:predictionId/confirm', auth, async (req, res) => {
       return res.status(400).json({ message: 'No jackpot payout for this prediction' });
     }
 
-    if (txHash && String(txHash).trim()) {
-      const { reserved } = await reserveTx('jackpot_withdraw', txHash, {
-        user: req.user._id,
-        predictionId: String(prediction._id),
-        amount: withdrawAmount,
+    let wallet = walletAddress;
+    if (!wallet) {
+      const link = await WalletLink.findOne({ user: req.user._id }).lean();
+      wallet = link?.walletAddress;
+    }
+    if (!wallet) {
+      return res.status(400).json({ message: 'walletAddress is required to verify transaction' });
+    }
+
+    await verifyJackpotWithdrawReceipt({
+      txHash: String(txHash).trim(),
+      walletAddress: wallet,
+      amountUsdc: withdrawAmount,
+    });
+
+    const result = await finalizeJackpotClaimInDb({
+      userId: req.user._id,
+      predictionId: prediction._id,
+      withdrawAmount,
+      txHash: String(txHash).trim(),
+    });
+
+    if (result.alreadyProcessed) {
+      return res.status(200).json({
+        message: 'Withdrawal already recorded',
+        alreadyProcessed: true,
+        remainingBalance: result.remainingBalance,
+        totalWithdrawn: result.totalWithdrawn,
       });
-      if (!reserved) {
-        const fresh = await User.findById(req.user._id);
-        return res.status(200).json({
-          message: 'Withdrawal already recorded',
-          alreadyProcessed: true,
-          remainingBalance: fresh?.jackpotBalance ?? 0,
-          totalWithdrawn: fresh?.jackpotWithdrawn ?? 0,
-        });
-      }
-    }
-
-    const updatedUser = await User.findOneAndUpdate(
-      {
-        _id: req.user._id,
-        jackpotBalancePending: { $gte: withdrawAmount },
-      },
-      {
-        $inc: { jackpotBalancePending: -withdrawAmount, jackpotWithdrawn: withdrawAmount },
-        $set: { jackpotWithdrawInProgress: false },
-      },
-      { new: true }
-    );
-    if (!updatedUser) {
-      return res.status(400).json({
-        message: 'No pending jackpot reservation for this amount. Contact support if USDC was received.',
-      });
-    }
-
-    const updatedPred = await Prediction.findOneAndUpdate(
-      { _id: prediction._id, jackpotClaimed: { $ne: true } },
-      {
-        $set: {
-          jackpotClaimed: true,
-          jackpotClaimInProgress: false,
-          ...(txHash ? { jackpotClaimTxHash: String(txHash).trim() } : {}),
-        },
-      },
-      { new: true }
-    );
-    if (!updatedPred) {
-      return res.status(400).json({ message: 'Jackpot already claimed for this prediction' });
-    }
-
-    if (txHash && String(txHash).trim()) {
-      await finalizeTx('jackpot_withdraw', txHash, { 'meta.completed': true });
     }
 
     res.json({
       message: 'Jackpot claimed successfully',
-      withdrawn: withdrawAmount,
-      remainingBalance: updatedUser.jackpotBalance,
-      totalWithdrawn: updatedUser.jackpotWithdrawn,
-      prediction: updatedPred,
+      withdrawn: result.withdrawn,
+      remainingBalance: result.remainingBalance,
+      totalWithdrawn: result.totalWithdrawn,
+      prediction: result.prediction,
     });
   } catch (error) {
     console.error('jackpot claim confirm:', error);
-    res.status(500).json({ message: error.message || 'Failed to confirm jackpot claim' });
+    const code = error.statusCode && Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    res.status(code).json({ message: error.message || 'Failed to confirm jackpot claim' });
   }
 });
 

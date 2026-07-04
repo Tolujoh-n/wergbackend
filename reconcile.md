@@ -1,5 +1,7 @@
 # Claim reconciliation guide
 
+> **Full platform security & claim flows:** see [`../SECURITY.md`](../SECURITY.md).
+
 This document explains how to align **MongoDB** claim balances with **on-chain** reality so existing users can claim **free jackpot**, **boost**, and **market** wins after the security hardening.
 
 ---
@@ -281,7 +283,37 @@ Reconciliation prepares the DB **before** this flow so balances and flags match 
 
 ---
 
-## Related scripts
+## Admin pools vs on-chain USDC pools (important)
+
+These are **two different things** — removing legacy user claim functions does **not** affect admin pool management.
+
+| What | Where | How admin changes it |
+|------|--------|----------------------|
+| **Event jackpot / boost pool** | MongoDB (`freeJackpotPool`, `boostPool` on match/poll) | Admin UI → Add/Subtract (API only). Used at **resolve** to calculate winner shares. |
+| **On-chain USDC vault** | Smart contract (`jackpotPool`, `claimPredictionWinsPool`) | Deployer/superAdmin calls `fundJackpotPool()` / `fundClaimPredictionWinsPool()` with USDC. Required so users can **receive** USDC when they claim. |
+| **Per-user claim cap (jackpot)** | On-chain `jackpotBalances[user]` | Settlement wallet (admin) calls `setJackpotBalance` / `batchSetJackpotBalances` after resolve or reconciliation. |
+
+**User claims always use signed auth:**
+
+- Free jackpot → `withdrawJackpotWithAuth` (backend signs)
+- Boost / market → `claimPredictionWinsWithAuth` or `claimOrderbookPositionWithAuth`
+
+**Removed from contract (security):** unsigned `withdrawJackpot()`, `claimPredictionWins()`, `claimBoost()`. Users cannot bypass the backend by calling Basescan directly.
+
+**Still on contract (unchanged):** `fundJackpotPool`, `fundClaimPredictionWinsPool`, `setJackpotBalance`, `batchSetJackpotBalances`, `setClaimableBoost`, `setClaimableMarket`.
+
+---
+
+## Confirm endpoint verification (new)
+
+After a successful on-chain tx, confirm endpoints require `txHash` and verify the receipt contains the expected event:
+
+- Jackpot: `JackpotWithdrawn(user, amount)`
+- Boost/market: `PredictionWinsClaimed` or `OrderbookPositionClaimed`
+
+If confirm fails after chain success, wait and retry — the frontend retries automatically. Stale jackpot reservations scan recent chain events before refunding pending balance.
+
+---
 
 | Command | Writes DB? |
 |---------|------------|

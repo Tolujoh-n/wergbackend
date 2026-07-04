@@ -25,6 +25,10 @@ const {
 const UserTransaction = require('../models/UserTransaction');
 const { reserveTx, finalizeTx, releaseTx } = require('../utils/processedTx');
 const {
+  verifyPredictionWinsClaimReceipt,
+  verifyOrderbookClaimReceipt,
+} = require('../utils/verifyClaimReceipt');
+const {
   splitBoostStakeGross,
   applyBoostStakeToEvent,
   validateVerifiedBoostNet,
@@ -1926,7 +1930,7 @@ router.post('/:predictionId/claim', auth, async (req, res) => {
     }
     
     if (prediction.claimed) {
-      return res.status(400).json({ message: 'Already claimed' });
+      return res.status(200).json({ message: 'Already claimed', alreadyProcessed: true });
     }
     
     if (prediction.status !== 'settled' || prediction.payout <= 0) {
@@ -1938,25 +1942,68 @@ router.post('/:predictionId/claim', auth, async (req, res) => {
       return res.status(400).json({ message: 'Item not resolved' });
     }
 
-    const { txHash } = req.body || {};
-    // Atomically flip claimed:false -> true. If another request already did it
-    // (double-click / retry after RPC timeout), updated is null and we stop here.
+    const { txHash, walletAddress } = req.body || {};
+    if (!txHash || !String(txHash).trim()) {
+      return res.status(400).json({ message: 'txHash is required' });
+    }
+    if (!walletAddress) {
+      return res.status(400).json({ message: 'walletAddress is required to verify transaction' });
+    }
+
+    const isOrderbookMarket =
+      prediction.type === 'market' &&
+      (prediction.marketChannel === 'orderbook' || String(prediction.outcome || '').includes('|'));
+
+    if (isOrderbookMarket) {
+      await verifyOrderbookClaimReceipt({
+        txHash: String(txHash).trim(),
+        walletAddress,
+        marketId: item.marketId,
+        amountUsdc: prediction.payout,
+        positionKey: prediction.outcome,
+      });
+    } else {
+      await verifyPredictionWinsClaimReceipt({
+        txHash: String(txHash).trim(),
+        walletAddress,
+        marketId: item.marketId,
+        amountUsdc: prediction.payout,
+      });
+    }
+
+    const scope = isOrderbookMarket ? 'market_claim' : prediction.type === 'boost' ? 'boost_claim' : 'market_claim';
+    const { reserved } = await reserveTx(scope, txHash, {
+      user: req.user._id,
+      predictionId: String(prediction._id),
+      amount: prediction.payout,
+    });
+    if (!reserved) {
+      const fresh = await Prediction.findById(prediction._id);
+      return res.status(200).json({
+        message: 'Already claimed',
+        alreadyProcessed: true,
+        prediction: fresh,
+      });
+    }
+
     const updated = await Prediction.findOneAndUpdate(
       { _id: prediction._id, claimed: { $ne: true } },
       {
         $set: {
           claimed: true,
           claimInProgress: false,
-          ...(txHash ? { claimTxHash: String(txHash).trim() } : {}),
+          claimTxHash: String(txHash).trim(),
         },
       },
       { new: true }
     );
     if (!updated) {
+      await releaseTx(scope, txHash);
       return res.status(400).json({ message: 'Already claimed' });
     }
 
-    // Update user balance (if you have a balance field) — credited once, gated above.
+    await finalizeTx(scope, txHash, { 'meta.completed': true });
+
     const user = await User.findById(req.user._id);
     if (user) {
       user.balance = (user.balance || 0) + prediction.payout;
@@ -1965,7 +2012,8 @@ router.post('/:predictionId/claim', auth, async (req, res) => {
     
     res.json({ prediction: updated, message: 'Payout claimed successfully' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    const code = error.statusCode && Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    res.status(code).json({ message: error.message || 'Failed to confirm claim' });
   }
 });
 
