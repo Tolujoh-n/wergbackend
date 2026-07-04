@@ -1889,6 +1889,29 @@ router.post('/settings/goldenTicketBoostRate', async (req, res) => {
   }
 });
 
+router.get('/settings/referralRewards', async (req, res) => {
+  try {
+    const { getReferralRewardSettings } = require('../services/referralService');
+    const settings = await getReferralRewardSettings();
+    res.json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/referralRewards', async (req, res) => {
+  try {
+    const { setReferralRewardSettings } = require('../services/referralService');
+    const settings = await setReferralRewardSettings({
+      enabled: req.body.enabled,
+      goldenTicketsPerReferral: req.body.goldenTicketsPerReferral,
+    });
+    res.json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Settings Management (generic key — register AFTER specific /settings/* routes)
 router.get('/settings/:key', async (req, res) => {
   try {
@@ -1953,6 +1976,55 @@ async function calculateBoostPayouts(matchId, pollId) {
   applyBoostPoolPayouts({ boostPool: pool, boostPredictions: predictions });
   for (const p of predictions) await p.save();
 }
+
+router.get('/users', async (req, res) => {
+  try {
+    const { listUsersForAdmin } = require('../services/userBanService');
+    const data = await listUsersForAdmin({
+      page: req.query.page,
+      limit: req.query.limit,
+      search: req.query.search,
+    });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/users/ban', async (req, res) => {
+  try {
+    const { resolveUserForBan, banUserById } = require('../services/userBanService');
+    const { userId, username, email, walletAddress, identifier, reason } = req.body;
+    const user = await resolveUserForBan({ userId, username, email, walletAddress, identifier });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const result = await banUserById(user._id, { reason, bannedBy: req.user._id });
+    res.json({
+      message: result.alreadyBanned ? 'User was already banned' : 'User banned',
+      user: {
+        id: result.user._id,
+        username: result.user.username,
+        banned: true,
+      },
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.post('/users/unban', async (req, res) => {
+  try {
+    const { unbanUserById } = require('../services/userBanService');
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ message: 'userId is required' });
+    const user = await unbanUserById(userId);
+    res.json({
+      message: 'User unbanned',
+      user: { id: user._id, username: user.username, banned: false },
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
 
 router.post('/users/gift-golden-tickets', async (req, res) => {
   try {

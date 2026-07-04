@@ -13,7 +13,9 @@
     "clear:streaks": "node scripts/clearStreaks.js",
     "reconcile:claims": "node scripts/reconcileClaimsFromChain.js",
     "reconcile:claims:apply": "node scripts/reconcileClaimsFromChain.js --apply",
-    "reconcile:claims:apply:sync": "node scripts/reconcileClaimsFromChain.js --apply --sync-on-chain"
+    "reconcile:claims:apply:sync": "node scripts/reconcileClaimsFromChain.js --apply --sync-on-chain",
+    "ban:users": "node scripts/banUsers.js",
+    "ban:users:dry-run": "node scripts/banUsers.js --dry-run"
   },
   "keywords": [],
   "author": "",

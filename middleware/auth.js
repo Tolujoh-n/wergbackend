@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { BAN_MESSAGE } = require('../services/userBanService');
 
 const auth = async (req, res, next) => {
   try {
@@ -14,6 +15,10 @@ const auth = async (req, res, next) => {
 
     if (!user) {
       return res.status(401).json({ message: 'Token is not valid' });
+    }
+
+    if (user.banned) {
+      return res.status(403).json({ message: BAN_MESSAGE, code: 'ACCOUNT_BANNED' });
     }
 
     req.user = user;

@@ -17,8 +17,27 @@ const {
 } = require('../services/emailVerificationService');
 const { assertAllowedEmail } = require('../utils/disposableEmail');
 const { recordLoginStreak } = require('../services/engagementStreakService');
+const { processReferralSignup } = require('../services/referralService');
+const { BAN_MESSAGE } = require('../services/userBanService');
 
 const router = express.Router();
+
+function rejectBannedUser(user, res) {
+  if (user?.banned) {
+    res.status(403).json({ message: BAN_MESSAGE, code: 'ACCOUNT_BANNED' });
+    return true;
+  }
+  return false;
+}
+
+async function applyReferralIfPresent({ referralCode, userId, isNewUser }) {
+  if (!isNewUser || !referralCode || !userId) return;
+  try {
+    await processReferralSignup({ referralCodeRaw: referralCode, newUserId: userId });
+  } catch (e) {
+    console.warn('referral signup:', e?.message || e);
+  }
+}
 
 async function touchLoginStreak(userId) {
   if (!userId) return;
@@ -162,7 +181,7 @@ async function linkWalletToUser({ userId, address }) {
 // Signup with email/password
 router.post('/signup', signupRateLimit, requireTurnstile, async (req, res) => {
   try {
-    const { email, password, username } = req.body;
+    const { email, password, username, referralCode } = req.body;
 
     const normalizedEmail = email ? assertAllowedEmail(email) : '';
     const normalizedUsername = username ? String(username).trim() : '';
@@ -189,6 +208,7 @@ router.post('/signup', signupRateLimit, requireTurnstile, async (req, res) => {
 
     const user = new User({ email: normalizedEmail, password, username: normalizedUsername });
     await user.save();
+    await applyReferralIfPresent({ referralCode, userId: user._id, isNewUser: true });
 
     const token = generateToken(user._id);
     await touchLoginStreak(user._id);
@@ -222,6 +242,8 @@ router.post('/login', loginRateLimit, requireTurnstile, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'Account not found. Please check your email/username or sign up.' });
     }
+
+    if (rejectBannedUser(user, res)) return;
 
     if (!user.password) {
       return res.status(400).json({ message: 'This account uses wallet login. Please connect your wallet to login.' });
@@ -363,6 +385,8 @@ router.post('/wallet-login', async (req, res) => {
 
     if (!user) return res.status(404).json({ message: 'User not found' });
 
+    if (rejectBannedUser(user, res)) return;
+
     const token = generateToken(user._id);
     await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
@@ -374,7 +398,7 @@ router.post('/wallet-login', async (req, res) => {
 // Signup with wallet
 router.post('/wallet-signup', async (req, res) => {
   try {
-    const { address } = req.body;
+    const { address, referralCode } = req.body;
     const walletAddress = normalizeWalletAddress(address);
     if (!walletAddress) {
       return res.status(400).json({ message: 'address is required' });
@@ -385,6 +409,7 @@ router.post('/wallet-signup', async (req, res) => {
     if (existingLink?.user) {
       const existingUser = await User.findById(existingLink.user);
       if (existingUser) {
+        if (rejectBannedUser(existingUser, res)) return;
         const token = generateToken(existingUser._id);
         await touchLoginStreak(existingUser._id);
         return res.json({ token, user: await toUserResponse(existingUser, { fast: true }) });
@@ -395,6 +420,7 @@ router.post('/wallet-signup', async (req, res) => {
     const user = new User({ walletAddress, username });
     await user.save();
     await WalletLink.create({ walletAddress, user: user._id });
+    await applyReferralIfPresent({ referralCode, userId: user._id, isNewUser: true });
 
     const token = generateToken(user._id);
     await touchLoginStreak(user._id);
@@ -481,7 +507,7 @@ router.post('/wallets/unlink', auth, async (req, res) => {
 // Google OAuth (ID token from frontend)
 router.post('/google', async (req, res) => {
   try {
-    const { credential } = req.body;
+    const { credential, referralCode } = req.body;
     if (!credential) return res.status(400).json({ message: 'Google credential required' });
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) return res.status(503).json({ message: 'Google login not configured' });
@@ -511,11 +537,14 @@ router.post('/google', async (req, res) => {
       }
       user = new User({ email, username, password: null, emailVerified: true, emailVerifiedAt: new Date() });
       await user.save();
+      await applyReferralIfPresent({ referralCode, userId: user._id, isNewUser: true });
     } else if (!user.emailVerifiedAt && email) {
       user.emailVerified = true;
       user.emailVerifiedAt = new Date();
       await user.save();
     }
+
+    if (rejectBannedUser(user, res)) return;
 
     const token = generateToken(user._id);
     ensureLegacyWalletLink(user).catch(() => {});

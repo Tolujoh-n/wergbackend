@@ -27,7 +27,11 @@ async function resolveUserByIdentifier({ email, walletAddress, identifier }) {
     if (link?.user) user = await User.findById(link.user);
     if (user) return user;
     user = await User.findOne({ walletAddress: wallet });
+    if (user) return user;
   }
+
+  user = await User.findOne({ username: raw });
+  if (user) return user;
 
   return user;
 }

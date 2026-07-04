@@ -147,6 +147,36 @@ const userSchema = new mongoose.Schema({
     sentAt: { type: Date },
     attempts: { type: Number, default: 0 },
   },
+  /** Unique share code for referral links (generated on first visit to referral page). */
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    uppercase: true,
+  },
+  /** User who referred this account (set once at signup). */
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  /** Platform ban — blocked from login and authenticated API access. */
+  banned: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  bannedAt: {
+    type: Date,
+  },
+  bannedReason: {
+    type: String,
+    default: '',
+  },
+  bannedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
   /** Cached on-chain NFT/FT bonus verification (fast free-page loads). */
   nftHoldingsCache: {
     rows: { type: mongoose.Schema.Types.Mixed, default: null },

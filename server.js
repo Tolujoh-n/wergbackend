@@ -53,6 +53,7 @@ app.use('/api/superadmin', require('./routes/superadmin'));
 app.use('/api/claims', require('./routes/claims'));
 app.use('/api/leaderboard', require('./routes/leaderboard'));
 app.use('/api/streaks', require('./routes/streaks'));
+app.use('/api/referrals', require('./routes/referrals'));
 app.use('/api/jackpots', require('./routes/jackpots'));
 app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/stages', require('./routes/stages'));
