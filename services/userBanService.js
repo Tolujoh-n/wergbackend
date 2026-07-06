@@ -2,6 +2,10 @@ const User = require('../models/User');
 const WalletLink = require('../models/WalletLink');
 const Referral = require('../models/Referral');
 const { resolveUserByIdentifier } = require('../utils/resolveUserByIdentifier');
+const {
+  isFreePlayEmailValid,
+  needsEmailReverification,
+} = require('../services/emailVerificationService');
 
 const BAN_MESSAGE = 'Your account is banned for unusual activities.';
 
@@ -98,20 +102,91 @@ async function buildUserSearchQuery(searchRaw) {
   return { $or: [{ username: regex }, { email: regex }] };
 }
 
-async function listUsersForAdmin({ page = 1, limit = 20, search = '' }) {
+function emailVerificationCutoff() {
+  const days = Math.max(1, parseInt(process.env.EMAIL_VERIFY_VALID_DAYS || '30', 10));
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+function buildVerifiedFilterQuery(verifiedFilter) {
+  const filter = String(verifiedFilter || 'all').toLowerCase();
+  if (filter === 'all') return {};
+
+  const cutoff = emailVerificationCutoff();
+  if (filter === 'verified') {
+    return {
+      emailVerified: true,
+      emailVerifiedAt: { $gte: cutoff },
+    };
+  }
+  if (filter === 'expired') {
+    return {
+      emailVerified: true,
+      emailVerifiedAt: { $exists: true, $ne: null, $lt: cutoff },
+    };
+  }
+  if (filter === 'unverified') {
+    return {
+      $or: [
+        { emailVerified: { $ne: true } },
+        { emailVerifiedAt: { $exists: false } },
+        { emailVerifiedAt: null },
+      ],
+    };
+  }
+  return {};
+}
+
+async function getEmailVerificationStats(baseQuery = {}) {
+  const cutoff = emailVerificationCutoff();
+  const [verified, expired, unverified] = await Promise.all([
+    User.countDocuments({
+      ...baseQuery,
+      emailVerified: true,
+      emailVerifiedAt: { $gte: cutoff },
+    }),
+    User.countDocuments({
+      ...baseQuery,
+      emailVerified: true,
+      emailVerifiedAt: { $exists: true, $ne: null, $lt: cutoff },
+    }),
+    User.countDocuments({
+      ...baseQuery,
+      $or: [
+        { emailVerified: { $ne: true } },
+        { emailVerifiedAt: { $exists: false } },
+        { emailVerifiedAt: null },
+      ],
+    }),
+  ]);
+  return { verified, expired, unverified, total: verified + expired + unverified };
+}
+
+function emailVerificationLabel(user) {
+  if (isFreePlayEmailValid(user)) return 'verified';
+  if (needsEmailReverification(user)) return 'expired';
+  return 'unverified';
+}
+
+async function listUsersForAdmin({ page = 1, limit = 20, search = '', verifiedFilter = 'all' }) {
   const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const safePage = Math.max(1, parseInt(page, 10) || 1);
   const skip = (safePage - 1) * safeLimit;
-  const query = await buildUserSearchQuery(search);
+  const searchQuery = await buildUserSearchQuery(search);
+  const verifiedQuery = buildVerifiedFilterQuery(verifiedFilter);
+  const query =
+    Object.keys(searchQuery).length && Object.keys(verifiedQuery).length
+      ? { $and: [searchQuery, verifiedQuery] }
+      : { ...searchQuery, ...verifiedQuery };
 
-  const [users, total] = await Promise.all([
+  const [users, total, emailStats] = await Promise.all([
     User.find(query)
-      .select('username email walletAddress banned bannedAt createdAt role goldenTickets')
+      .select('username email walletAddress banned bannedAt createdAt role goldenTickets emailVerified emailVerifiedAt phoneVerified')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(safeLimit)
       .lean(),
     User.countDocuments(query),
+    getEmailVerificationStats(),
   ]);
 
   const ids = users.map((u) => u._id);
@@ -147,6 +222,9 @@ async function listUsersForAdmin({ page = 1, limit = 20, search = '' }) {
       goldenTickets: u.goldenTickets ?? 0,
       referralCount: referralMap.get(String(u._id)) || 0,
       createdAt: u.createdAt,
+      emailVerified: Boolean(u.emailVerified),
+      emailVerifiedAt: u.emailVerifiedAt || null,
+      emailVerificationStatus: emailVerificationLabel(u),
     };
   });
 
@@ -156,6 +234,7 @@ async function listUsersForAdmin({ page = 1, limit = 20, search = '' }) {
     page: safePage,
     limit: safeLimit,
     pages: Math.max(1, Math.ceil(total / safeLimit)),
+    emailStats,
   };
 }
 

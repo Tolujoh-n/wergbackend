@@ -1984,6 +1984,7 @@ router.get('/users', async (req, res) => {
       page: req.query.page,
       limit: req.query.limit,
       search: req.query.search,
+      verifiedFilter: req.query.verifiedFilter,
     });
     res.json(data);
   } catch (error) {
