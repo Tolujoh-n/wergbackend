@@ -4,8 +4,65 @@ const Settings = require('../models/Settings');
 const Match = require('../models/Match');
 const Poll = require('../models/Poll');
 const SuperAdminTransaction = require('../models/SuperAdminTransaction');
+const {
+  getTicketTotalsByEvent,
+  displayJackpotPools,
+} = require('../utils/poolDistribution');
 
 const router = express.Router();
+
+function enrichEvents(docs, kind, ticketMap) {
+  return docs.map((item) => {
+    const pools = displayJackpotPools(item);
+    return {
+      ...item,
+      totalFreeTickets: ticketMap.get(String(item._id)) || 0,
+      displayFreeJackpot: pools.freeJackpot,
+      displayBoostJackpot: pools.boostJackpot,
+    };
+  });
+}
+
+function computeFeeTotals(items) {
+  return items.reduce(
+    (acc, row) => ({
+      count: acc.count + 1,
+      totalFreeTickets: acc.totalFreeTickets + (Number(row.totalFreeTickets) || 0),
+      platformFees: acc.platformFees + (Number(row.platformFees) || 0),
+      marketPlatformFees: acc.marketPlatformFees + (Number(row.marketPlatformFees) || 0),
+      boostPool: acc.boostPool + (Number(row.displayBoostJackpot ?? row.boostPool) || 0),
+    }),
+    { count: 0, totalFreeTickets: 0, platformFees: 0, marketPlatformFees: 0, boostPool: 0 }
+  );
+}
+
+async function loadEnrichedMatches() {
+  const matches = await Match.find()
+    .populate('cup', 'name slug')
+    .populate('stage', 'name')
+    .select(
+      'teamA teamB date status result isResolved freeJackpotPool boostPool originalFreeJackpotPool originalBoostPool platformFees marketPlatformFees cup stage createdAt'
+    )
+    .sort({ date: -1 })
+    .lean();
+  const ticketMap = await getTicketTotalsByEvent(matches.map((m) => m._id), 'match');
+  const items = enrichEvents(matches, 'match', ticketMap);
+  return { items, totals: computeFeeTotals(items) };
+}
+
+async function loadEnrichedPolls() {
+  const polls = await Poll.find()
+    .populate('cup', 'name slug')
+    .populate('stage', 'name')
+    .select(
+      'question type date status result isResolved freeJackpotPool boostPool originalFreeJackpotPool originalBoostPool platformFees marketPlatformFees cup stage createdAt'
+    )
+    .sort({ date: -1, createdAt: -1 })
+    .lean();
+  const ticketMap = await getTicketTotalsByEvent(polls.map((p) => p._id), 'poll');
+  const items = enrichEvents(polls, 'poll', ticketMap);
+  return { items, totals: computeFeeTotals(items) };
+}
 
 // Get fees endpoint (public - fees should be visible to all users)
 router.get('/get-fees', async (req, res) => {
@@ -174,16 +231,11 @@ router.post('/set-superadmin', async (req, res) => {
   }
 });
 
-// Get matches with jackpot and fee data
+// Get matches with jackpot, ticket, and fee data
 router.get('/matches', async (req, res) => {
   try {
-    const matches = await Match.find()
-      .populate('cup', 'name slug')
-      .populate('stage', 'name')
-      .select('teamA teamB date status isResolved freeJackpotPool boostJackpotPool originalFreeJackpotPool originalBoostJackpotPool platformFees cup stage createdAt')
-      .sort({ createdAt: -1 });
-    
-    res.json(matches);
+    const data = await loadEnrichedMatches();
+    res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -225,16 +277,11 @@ router.post('/orderbook/finalize-market', async (req, res) => {
   }
 });
 
-// Get polls with jackpot and fee data
+// Get polls with jackpot, ticket, and fee data
 router.get('/polls', async (req, res) => {
   try {
-    const polls = await Poll.find()
-      .populate('cup', 'name slug')
-      .populate('stage', 'name')
-      .select('question type status isResolved freeJackpotPool boostJackpotPool originalFreeJackpotPool originalBoostJackpotPool platformFees cup stage createdAt')
-      .sort({ createdAt: -1 });
-    
-    res.json(polls);
+    const data = await loadEnrichedPolls();
+    res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

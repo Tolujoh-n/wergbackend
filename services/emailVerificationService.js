@@ -302,6 +302,7 @@ module.exports = {
   verifyEmailCode,
   emailStatusForUser,
   isFreePlayEmailValid,
+  needsEmailReverification,
   ensureLegacyEmailVerifiedAt,
   VALID_DAYS,
 };
