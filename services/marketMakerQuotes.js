@@ -275,7 +275,7 @@ async function absorbUserCrossingAndPartialOrders({
           direction: mmDirection,
           orderKind: 'market',
           size: takeRemaining,
-          slippageBps: Math.max(200, Number(ob.maxSlippageBps) || 300),
+          slippageBps: Math.max(200, Number(ob.maxSlippageBps) || 1000),
           isMarketMaker: true,
         });
         absorbed += 1;

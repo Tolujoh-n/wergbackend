@@ -2171,6 +2171,26 @@ router.post('/matches/:id/jackpot-pool', async (req, res) => {
   }
 });
 
+router.get('/matches/:id/claim-stats', async (req, res) => {
+  try {
+    const { getEventClaimStats } = require('../services/eventClaimStats');
+    const stats = await getEventClaimStats('match', req.params.id);
+    res.json(stats);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ message: e.message });
+  }
+});
+
+router.get('/polls/:id/claim-stats', async (req, res) => {
+  try {
+    const { getEventClaimStats } = require('../services/eventClaimStats');
+    const stats = await getEventClaimStats('poll', req.params.id);
+    res.json(stats);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ message: e.message });
+  }
+});
+
 router.get('/matches/:id/boost-pool', async (req, res) => {
   const m = await Match.findById(req.params.id).select('boostPool teamA teamB');
   if (!m) return res.status(404).json({ message: 'Not found' });

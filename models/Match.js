@@ -197,7 +197,7 @@ const matchSchema = new mongoose.Schema({
     spreadBps: { type: Number, default: 80 },
     minSpreadFloorBps: { type: Number, default: 20 },
     quoteSizeUsdc: { type: Number, default: 50 },
-    maxSlippageBps: { type: Number, default: 300 },
+    maxSlippageBps: { type: Number, default: 1000 },
     maxTreasuryLossUsdc: { type: Number, default: 100000 },
     maxTreasuryLossYesUsdc: { type: Number, default: 50000 },
     maxTreasuryLossNoUsdc: { type: Number, default: 50000 },

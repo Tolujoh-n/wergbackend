@@ -287,4 +287,24 @@ router.get('/polls', async (req, res) => {
   }
 });
 
+router.get('/matches/:id/claim-stats', async (req, res) => {
+  try {
+    const { getEventClaimStats } = require('../services/eventClaimStats');
+    const stats = await getEventClaimStats('match', req.params.id);
+    res.json(stats);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ message: e.message });
+  }
+});
+
+router.get('/polls/:id/claim-stats', async (req, res) => {
+  try {
+    const { getEventClaimStats } = require('../services/eventClaimStats');
+    const stats = await getEventClaimStats('poll', req.params.id);
+    res.json(stats);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ message: e.message });
+  }
+});
+
 module.exports = router;

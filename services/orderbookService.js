@@ -8,6 +8,7 @@ const Settings = require('../models/Settings');
 const WalletLink = require('../models/WalletLink');
 const SettlementOutbox = require('../models/SettlementOutbox');
 const { processSettlementOutboxBatch, applyLegsToOrderbookPositions } = require('./settlementOutbox');
+const { persistOrderbookFills, getOrderbookTradeTape } = require('./orderbookFills');
 const { getContractAddress, getReadJsonRpcProvider } = require('../utils/chainConfig');
 const { isEventLockedByTime } = require('../utils/eventLock');
 const {
@@ -52,7 +53,7 @@ async function getOrderbookDefaults() {
     spreadBps: v.spreadBps ?? 80,
     minSpreadFloorBps: v.minSpreadFloorBps ?? 20,
     quoteSizeUsdc: v.quoteSizeUsdc ?? 50,
-    maxSlippageBps: v.maxSlippageBps ?? 300,
+    maxSlippageBps: v.maxSlippageBps ?? 1000,
     maxTreasuryLossUsdc: v.maxTreasuryLossUsdc ?? 100000,
     maxTreasuryLossYesUsdc: v.maxTreasuryLossYesUsdc ?? 50000,
     maxTreasuryLossNoUsdc: v.maxTreasuryLossNoUsdc ?? 50000,
@@ -471,6 +472,7 @@ async function continueOrderMatchSettlement(orderId, item, kind, fees) {
       if (Number(fresh.sizeRemaining) <= 1e-9) return;
       const { fills, touched } = await runMatch(fresh, fees, session);
       if (fills.length === 0) return;
+      await persistOrderbookFills({ fills, takerOrder: fresh, touched, session });
       const { legs, feeToClaimPool, feeToJackpotPool, feePlatformUsd, feeJackpotUsd } = buildSettlementLegs(
         fresh,
         fills
@@ -751,10 +753,8 @@ async function placeOrder(payload) {
         code: 'NO_LIQUIDITY',
       });
     }
-    const obSlipBps = Math.max(
-      Number(slippageBps) || 100,
-      Number(item.orderbook?.maxSlippageBps) || 300
-    );
+    const maxSlipCap = Number(item.orderbook?.maxSlippageBps) || 1000;
+    const obSlipBps = Math.min(Math.max(0, Number(slippageBps) || 0), maxSlipCap);
     const slip = obSlipBps / 10000;
     if (direction === 'buy') {
       px = Math.min(0.99, best.limitPrice * (1 + slip));
@@ -875,6 +875,8 @@ async function placeOrder(payload) {
         await fresh.save({ session });
         return;
       }
+
+      await persistOrderbookFills({ fills, takerOrder: fresh, touched, session });
 
       const { legs, feeToClaimPool, feeToJackpotPool, feePlatformUsd, feeJackpotUsd } = buildSettlementLegs(
         fresh,
@@ -1076,27 +1078,53 @@ async function impliedProbabilityByOption(chainMarketId, optionKeys, startingPri
  */
 async function getOrderbookMarketActivity(chainMarketId, optionKeys, startingPricesRows = []) {
   const keys = (optionKeys || []).map((k) => String(k).trim()).filter(Boolean);
-  const orders = await Order.find({
-    ...withOrderbookContract({ chainMarketId }),
-    sizeFilled: { $gt: 0 },
-  })
-    .sort({ updatedAt: 1 })
-    .limit(400)
-    .select('optionKey side limitPrice sizeFilled updatedAt createdAt direction isMarketMaker')
-    .lean();
-
-  const trades = orders.map((o) => ({
-    t: o.updatedAt || o.createdAt,
-    optionKey: String(o.optionKey || ''),
-    side: o.side,
-    price: Number(o.limitPrice) || 0,
-    size: Number(o.sizeFilled) || 0,
-    direction: o.direction,
-    isMarketMaker: !!o.isMarketMaker,
-  }));
-
+  const trades = await getOrderbookTradeTape(chainMarketId, 400);
   const impliedNow = await impliedProbabilityByOption(chainMarketId, keys, startingPricesRows);
   return { trades, impliedNow };
+}
+
+/**
+ * Aggregate open positions per outcome side (USDC = cost basis; mark-to-market fallback).
+ */
+async function getPositionPoolsByOption(chainMarketId, booksByOption = {}) {
+  const positions = await OrderbookPosition.find(
+    withOrderbookContract({ chainMarketId, shares: { $gt: 1e-9 } })
+  )
+    .select('positionKey shares totalInvested')
+    .lean();
+
+  const pools = {};
+  for (const p of positions) {
+    const pk = String(p.positionKey || '');
+    const [optionKey, sideRaw] = pk.split('|');
+    const side = String(sideRaw || '').toUpperCase();
+    if (!optionKey || (side !== 'YES' && side !== 'NO')) continue;
+    if (!pools[optionKey]) {
+      pools[optionKey] = {
+        YES: { shares: 0, usdc: 0 },
+        NO: { shares: 0, usdc: 0 },
+      };
+    }
+    const sh = Number(p.shares) || 0;
+    const inv = Number(p.totalInvested) || 0;
+    pools[optionKey][side].shares += sh;
+    pools[optionKey][side].usdc += inv;
+  }
+
+  for (const [optionKey, sides] of Object.entries(pools)) {
+    for (const side of ['YES', 'NO']) {
+      if (sides[side].usdc < 1e-9 && sides[side].shares > 1e-9) {
+        const mid = midFromBookSide(
+          booksByOption[optionKey]?.[side]?.bids,
+          booksByOption[optionKey]?.[side]?.asks
+        );
+        if (mid != null) sides[side].usdc = sides[side].shares * mid;
+      }
+      sides[side].shares = parseFloat(sides[side].shares.toFixed(6));
+      sides[side].usdc = parseFloat(sides[side].usdc.toFixed(6));
+    }
+  }
+  return pools;
 }
 
 /**
@@ -1140,26 +1168,11 @@ async function getMarketSnapshot(chainMarketId, optionKeys, startingPricesRows =
   const impliedNow = {};
   for (const k of Object.keys(raw)) impliedNow[k] = raw[k] / sum;
 
-  const orders = await Order.find({
-    ...withOrderbookContract({ chainMarketId }),
-    sizeFilled: { $gt: 0 },
-  })
-    .sort({ updatedAt: 1 })
-    .limit(400)
-    .select('optionKey side limitPrice sizeFilled updatedAt createdAt direction isMarketMaker')
-    .lean();
+  const trades = await getOrderbookTradeTape(chainMarketId, 400);
 
-  const trades = orders.map((o) => ({
-    t: o.updatedAt || o.createdAt,
-    optionKey: String(o.optionKey || ''),
-    side: o.side,
-    price: Number(o.limitPrice) || 0,
-    size: Number(o.sizeFilled) || 0,
-    direction: o.direction,
-    isMarketMaker: !!o.isMarketMaker,
-  }));
+  const positionPoolsByOption = await getPositionPoolsByOption(chainMarketId, booksByOption);
 
-  return { booksByOption, trades, impliedNow };
+  return { booksByOption, trades, impliedNow, positionPoolsByOption };
 }
 
 module.exports = {
@@ -1191,4 +1204,5 @@ module.exports = {
   impliedProbabilityByOption,
   getOrderbookMarketActivity,
   getMarketSnapshot,
+  getPositionPoolsByOption,
 };
