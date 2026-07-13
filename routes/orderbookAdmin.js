@@ -15,9 +15,17 @@ const {
   pendingVaultDebitForWallet,
   openBuyOrderReservedUsd,
 } = require('../services/orderbookService');
-const { runMatchMmTick, runPollMmTick, scheduleMarketMakerSeed, scheduleForceRequoteMarketMm } = require('../services/marketMakerQuotes');
+const {
+  runMatchMmTick,
+  runPollMmTick,
+  scheduleMarketMakerSeed,
+  scheduleForceRequoteMarketMm,
+  getMarketMakerActor,
+} = require('../services/marketMakerQuotes');
 const { normalizeStartingPricesRows } = require('../utils/targetOdds');
-const { withOrderbookContract } = require('../utils/orderbookContractScope');
+const { withOrderbookContract, withOrderbookContractOrLegacy } = require('../utils/orderbookContractScope');
+const Order = require('../models/Order');
+const OrderbookPosition = require('../models/OrderbookPosition');
 
 const router = express.Router();
 router.use(auth);
@@ -178,25 +186,72 @@ router.get('/mm-actor', async (req, res) => {
 /** On-chain vault + reserve breakdown for the MM bot wallet (admin troubleshooting). */
 router.get('/mm-vault', async (req, res) => {
   try {
-    const s = await getMmActorFromSettings();
-    if (!s.walletAddress) {
+    // Prefer the same actor the bot uses (Settings wallet → env MARKET_MAKER_USER_ID).
+    const actor = await getMarketMakerActor();
+    const walletAddress = actor?.walletAddress || null;
+    if (!walletAddress) {
       return res.status(400).json({ message: 'Market maker wallet not configured' });
     }
-    const wl = String(s.walletAddress).toLowerCase();
-    const [vault, reserved, pendingSettle, openBuyReserve] = await Promise.all([
-      readVaultBalance(s.walletAddress),
+    const wl = String(walletAddress).toLowerCase();
+    const [vault, reserved, pendingSettle, openBuyReserve, openAskAgg, posAgg] = await Promise.all([
+      readVaultBalance(walletAddress),
       reservedCollateralForWallet(wl),
       pendingVaultDebitForWallet(wl),
       openBuyOrderReservedUsd(wl),
+      Order.aggregate([
+        {
+          $match: withOrderbookContractOrLegacy({
+            walletAddress: wl,
+            isMarketMaker: true,
+            direction: 'sell',
+            status: { $in: ['open', 'partially_filled'] },
+            sizeRemaining: { $gt: 1e-9 },
+          }),
+        },
+        {
+          $group: {
+            _id: null,
+            notional: {
+              $sum: { $multiply: ['$sizeRemaining', '$limitPrice'] },
+            },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      OrderbookPosition.aggregate([
+        {
+          $match: withOrderbookContractOrLegacy({
+            walletAddress: wl,
+          }),
+        },
+        {
+          $group: {
+            _id: null,
+            invested: { $sum: '$totalInvested' },
+            shares: { $sum: '$shares' },
+          },
+        },
+      ]),
     ]);
     const available = Math.max(0, vault - reserved);
+    const openAskNotionalUsdc = parseFloat((openAskAgg?.[0]?.notional || 0).toFixed(6));
+    const openAskOrderCount = openAskAgg?.[0]?.count || 0;
+    const positionInvestedUsdc = parseFloat((posAgg?.[0]?.invested || 0).toFixed(6));
+    const positionShares = parseFloat((posAgg?.[0]?.shares || 0).toFixed(6));
     res.json({
-      walletAddress: s.walletAddress,
+      walletAddress,
+      userId: actor?.user?._id ? String(actor.user._id) : null,
       onChainVaultUsdc: vault,
       reservedUsdc: reserved,
       pendingSettlementUsdc: pendingSettle,
       openBuyOrdersReservedUsdc: openBuyReserve,
+      openAskNotionalUsdc,
+      openAskOrderCount,
+      positionInvestedUsdc,
+      positionShares,
       availableUsdc: available,
+      note:
+        'Reserved is USDC locked for open/partial buy orders + pending settlement debits. Resting asks do not increase Reserved (they use share inventory).',
     });
   } catch (e) {
     res.status(500).json({ message: e.message });

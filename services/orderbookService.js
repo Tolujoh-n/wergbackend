@@ -820,7 +820,8 @@ async function placeOrder(payload) {
       orderKind === 'market'
         ? sz
         : await estimateImmediatelyMatchableSellShares(item.marketId, optionKey, side, w, px, sz);
-    if (held < requiredNow - 1e-6) {
+    // Market maker may short / invent inventory so the book never runs dry of asks.
+    if (!isMarketMaker && held < requiredNow - 1e-6) {
       throw Object.assign(new Error('Insufficient shares to sell'), {
         statusCode: 400,
         code: 'INSUFFICIENT_SHARES',
@@ -1201,6 +1202,7 @@ module.exports = {
   estimateBuyLimitVaultNeedUsd,
   estimateBuyLimitVaultNeedUsdFromBook,
   estimateImmediatelyMatchableSellShares,
+  midFromBookSide,
   impliedProbabilityByOption,
   getOrderbookMarketActivity,
   getMarketSnapshot,

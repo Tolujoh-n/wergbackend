@@ -49,7 +49,7 @@ function getRelayerWallet(provider) {
 
 function getGasDripConfig() {
   const minBalanceEth = Number(process.env.GASDRIP_MIN_BALANCE_ETH || '0.00005');
-  const sendAmountEth = Number(process.env.GASDRIP_SEND_AMOUNT_ETH || '0.0002');
+  const sendAmountEth = Number(process.env.GASDRIP_SEND_AMOUNT_ETH || '0.0001');
   return {
     minBalanceWei: ethers.parseEther(String(minBalanceEth)),
     sendAmountWei: ethers.parseEther(String(sendAmountEth)),
@@ -114,7 +114,9 @@ router.post('/gasdrip', auth, async (req, res) => {
     const relayerBal = await readProvider.getBalance(relayer.address);
     if (relayerBal < sendAmountWei) {
       return res.status(503).json({
-        message: 'Relayer has insufficient balance to drip gas',
+        code: 'RELAYER_OUT_OF_GAS',
+        message:
+          'Relayer has no fund to drip gas. Get a little Base ETH to process transactions — they need up to about $0.1 in ETH to pay gas.',
         relayerAddress: relayer.address,
       });
     }

@@ -16,9 +16,11 @@ const {
   orderSideBookKey,
   sellBookCacheForKeys,
   isOptionSidePaused,
+  midFromBookSide,
 } = require('./orderbookService');
 const { isCrossingOrder } = require('./orderbookTradingPanel');
 const { mmLevelSizesForSide, mmLevelCountForSide, sideVolumeUsdc } = require('../utils/mmQuoteVolume');
+const OrderbookFill = require('../models/OrderbookFill');
 
 function isInsufficientSharesError(e) {
   return (
@@ -29,6 +31,8 @@ function isInsufficientSharesError(e) {
 
 const LEVELS = 3; // legacy default; dynamic levels use mmLevelCountForSide
 const PRICE_TOL = 1e-4;
+/** Requote when MM center drifts this far from live fair mid (absolute price). */
+const MID_DRIFT_ABS = 0.02;
 
 /**
  * Schedule non-blocking orderbook MM seed after admin creates a market.
@@ -73,7 +77,8 @@ function matchOptionKeys(doc) {
   return keys;
 }
 
-function midForOutcome(doc, optionKey, side) {
+/** Admin target / seed mid from startingPrices (YES/NO per outcome). */
+function targetMidForOutcome(doc, optionKey, side) {
   const list = doc?.startingPrices || doc?.orderbook?.startingPrices || [];
   const row = list.find((r) => String(r.optionKey) === String(optionKey));
   if (!row) return 0.5;
@@ -82,6 +87,96 @@ function midForOutcome(doc, optionKey, side) {
   if (side === 'YES' && Number.isFinite(yes) && yes > 0 && yes < 1) return yes;
   if (side === 'NO' && Number.isFinite(no) && no > 0 && no < 1) return no;
   return 0.5;
+}
+
+/** @deprecated alias — prefer targetMidForOutcome or resolveQuoteMid */
+function midForOutcome(doc, optionKey, side) {
+  return targetMidForOutcome(doc, optionKey, side);
+}
+
+/**
+ * Fair mid for MM quotes after the market is live:
+ * 1) mid from non-MM resting orders (where users are actually bidding/asking)
+ * 2) else last trade price on this outcome/side (moves mid after buys/sells)
+ * 3) else full book mid
+ * 4) else admin startingPrices
+ *
+ * Admin force-requote uses target mid explicitly so new odds can be pulled into the book.
+ */
+async function resolveQuoteMid({ doc, optionKey, side, chainMarketId, mmWalletLower, preferTarget = false }) {
+  const target = targetMidForOutcome(doc, optionKey, side);
+  if (preferTarget) return target;
+
+  let book;
+  try {
+    book = await getBook(chainMarketId, optionKey, side);
+  } catch {
+    book = { bids: [], asks: [] };
+  }
+
+  const wl = String(mmWalletLower || '').toLowerCase();
+  const isMm = (r) => String(r?.walletAddress || '').toLowerCase() === wl;
+  const extBids = (book.bids || []).filter((r) => !isMm(r));
+  const extAsks = (book.asks || []).filter((r) => !isMm(r));
+  const extMid = midFromBookSide(extBids, extAsks);
+  if (extMid != null && Number.isFinite(extMid)) {
+    return Math.max(0.01, Math.min(0.99, extMid));
+  }
+
+  try {
+    const lastFill = await OrderbookFill.findOne(
+      withOrderbookContract({
+        chainMarketId,
+        optionKey: String(optionKey),
+        side,
+      })
+    )
+      .sort({ filledAt: -1 })
+      .select('price filledAt')
+      .lean();
+    const px = Number(lastFill?.price);
+    if (Number.isFinite(px) && px > 0 && px < 1) {
+      return Math.max(0.01, Math.min(0.99, px));
+    }
+  } catch {
+    /* ignore tape errors */
+  }
+
+  const fullMid = midFromBookSide(book.bids, book.asks);
+  if (fullMid != null && Number.isFinite(fullMid)) {
+    return Math.max(0.01, Math.min(0.99, fullMid));
+  }
+  return target;
+}
+
+/** Center of this MM wallet's resting quotes (for drift detection). */
+async function mmOwnQuoteCenter({ chainMarketId, optionKey, side, mmWalletLower }) {
+  const orders = await Order.find(
+    withOrderbookContractOrLegacy({
+      chainMarketId,
+      optionKey,
+      side,
+      isMarketMaker: true,
+      walletAddress: mmWalletLower,
+      status: { $in: ['open', 'partially_filled'] },
+      sizeRemaining: { $gt: 1e-9 },
+    })
+  )
+    .select('direction limitPrice')
+    .lean();
+  if (!orders.length) return null;
+  let bestBid = null;
+  let bestAsk = null;
+  for (const o of orders) {
+    const px = Number(o.limitPrice);
+    if (!Number.isFinite(px)) continue;
+    if (o.direction === 'buy') bestBid = bestBid == null ? px : Math.max(bestBid, px);
+    else if (o.direction === 'sell') bestAsk = bestAsk == null ? px : Math.min(bestAsk, px);
+  }
+  if (bestBid != null && bestAsk != null) return (bestBid + bestAsk) / 2;
+  if (bestBid != null) return bestBid;
+  if (bestAsk != null) return bestAsk;
+  return null;
 }
 
 function pollOptionKeys(item) {
@@ -98,7 +193,9 @@ function pollOptionKeys(item) {
 
 function buildLevelPrices(ob, mid = 0.5, levelCount = LEVELS) {
   const levels = Math.max(1, Math.min(12, Number(levelCount) || LEVELS));
-  const spread = (ob.spreadBps ?? 80) / 10000;
+  const rawSpread = (ob.spreadBps ?? 80) / 10000;
+  const floor = (ob.minSpreadFloorBps ?? 0) / 10000;
+  const spread = Math.max(rawSpread, floor, 0.01);
   const tick = Math.max(0.005, spread / Math.max(2, levels));
   const bids = [];
   const asks = [];
@@ -106,7 +203,38 @@ function buildLevelPrices(ob, mid = 0.5, levelCount = LEVELS) {
     bids.push(Math.max(0.01, mid - spread / 2 - i * tick));
     asks.push(Math.min(0.99, mid + spread / 2 + i * tick));
   }
-  return { bids, asks };
+  return { bids, asks, tick, spread };
+}
+
+/**
+ * Keep maintenance quotes from crossing the external book (avoids unintended taker fills).
+ * Admin target pulls (preferTarget) skip clamping so the bot can move the market.
+ */
+function clampPassiveLevels(bids, asks, book, mmWalletLower, tick, allowCross) {
+  if (allowCross) return { bids, asks };
+  const wl = String(mmWalletLower || '').toLowerCase();
+  const isMm = (r) => String(r?.walletAddress || '').toLowerCase() === wl;
+  const extBids = (book?.bids || []).filter((r) => !isMm(r));
+  const extAsks = (book?.asks || []).filter((r) => !isMm(r));
+  const bestExtBid = extBids[0]?.limitPrice != null ? Number(extBids[0].limitPrice) : null;
+  const bestExtAsk = extAsks[0]?.limitPrice != null ? Number(extAsks[0].limitPrice) : null;
+  const t = Math.max(0.005, Number(tick) || 0.005);
+
+  const outBids = bids.map((px) => {
+    let p = px;
+    if (bestExtAsk != null && Number.isFinite(bestExtAsk)) {
+      p = Math.min(p, bestExtAsk - t);
+    }
+    return Math.max(0.01, Math.min(0.99, p));
+  });
+  const outAsks = asks.map((px) => {
+    let p = px;
+    if (bestExtBid != null && Number.isFinite(bestExtBid)) {
+      p = Math.max(p, bestExtBid + t);
+    }
+    return Math.max(0.01, Math.min(0.99, p));
+  });
+  return { bids: outBids, asks: outAsks };
 }
 
 async function mmExposureBySideUsdc({ chainMarketId, mmWalletLower, side }) {
@@ -356,22 +484,41 @@ async function ensureMinBookDepth({
   side,
   mmWalletLower,
   pauseNewBuys,
+  pauseMmAsks,
   placeMmOrder,
   basePayload,
   spreadMult,
   quoteMult,
+  preferTarget = false,
 }) {
   const levelCount = mmLevelCountForSide(doc, optionKey, side, quoteMult);
   const book = await getBook(chainMarketId, optionKey, side);
   const bidCount = book.bids?.length || 0;
   const askCount = book.asks?.length || 0;
   const needBids = bidCount < levelCount;
-  const needAsks = !pauseNewBuys && askCount < levelCount;
+  const needAsks = !pauseMmAsks && askCount < levelCount;
   if (!needBids && !needAsks) return 0;
 
   const spreadBps = (ob.spreadBps ?? 80) * spreadMult;
-  const mid = midForOutcome(doc, optionKey, side);
-  const { bids, asks } = buildLevelPrices({ ...ob, spreadBps }, mid, levelCount);
+  const mid = await resolveQuoteMid({
+    doc,
+    optionKey,
+    side,
+    chainMarketId,
+    mmWalletLower,
+    preferTarget,
+  });
+  const built = buildLevelPrices({ ...ob, spreadBps }, mid, levelCount);
+  const clamped = clampPassiveLevels(
+    built.bids,
+    built.asks,
+    book,
+    mmWalletLower,
+    built.tick,
+    preferTarget
+  );
+  const bids = clamped.bids;
+  const asks = clamped.asks;
   const { bidSizes, askSizes } = mmLevelSizesForSide(doc, optionKey, side, bids, asks, quoteMult);
 
   let placed = 0;
@@ -401,7 +548,7 @@ async function ensureMinBookDepth({
     }
   }
 
-  for (let i = askCount; i < levelCount && !pauseNewBuys; i++) {
+  for (let i = askCount; i < levelCount && !pauseMmAsks; i++) {
     const askPx = asks[Math.min(i, asks.length - 1)];
     const q = askSizes[i] ?? askSizes[askSizes.length - 1] ?? 1;
     const hasSell = await hasOpenMmQuoteAt({
@@ -425,6 +572,9 @@ async function ensureMinBookDepth({
       if (ok) placed += 1;
     }
   }
+
+  // pauseNewBuys kept for call-site clarity (MM bids still allowed via assertSideNotPaused)
+  void pauseNewBuys;
 
   return placed;
 }
@@ -546,7 +696,8 @@ async function forceRequoteMarketMm(doc, kind) {
       await cancelMmQuotesForOptionSide(doc.marketId, mmWalletLower, optionKey, side);
     }
   }
-  return ensureQuotesForDoc(doc, kind);
+  // Prefer admin target mids so saving new odds pulls the book toward that target.
+  return ensureQuotesForDoc(doc, kind, { preferTarget: true });
 }
 
 /** Non-blocking requote after admin updates target odds — keeps PUT responses fast. */
@@ -647,10 +798,14 @@ async function syncOrderbookRiskToDb(item, kind) {
  * Top up to LEVELS bid + LEVELS ask per (outcome, YES/NO) for the MM wallet.
  * Idempotent: only places missing price levels so cron can run safely.
  *
+ * Fair mid follows the live book (not only admin startingPrices). Admin force-requote
+ * passes preferTarget so new odds are posted at the configured startingPrices.
+ *
  * Note: Admin "initial liquidity" (batchAddOrderbookLiquidity) is on-chain only;
  * the CLOB matcher uses MongoDB orders — this is what makes market orders work.
  */
-async function ensureQuotesForDoc(doc, kind) {
+async function ensureQuotesForDoc(doc, kind, opts = {}) {
+  const preferTarget = opts.preferTarget === true;
   const actor = await getMarketMakerActor();
   if (!actor) {
     return { skipped: true, reason: 'MARKET_MAKER_USER_ID or linked wallet missing' };
@@ -756,18 +911,64 @@ async function ensureQuotesForDoc(doc, kind) {
     console.warn('[marketMakerQuotes] absorb batch', doc.marketId, e.message || e);
   }
 
+  let driftCancels = 0;
+
   for (const optionKey of optionKeys) {
     for (const side of ['YES', 'NO']) {
       const sidePaused = isOptionSidePaused(ob, optionKey, side);
+      // Risk/manual pause blocks new user buys and MM asks (assertSideNotPaused).
+      // MM bids still allowed so users can exit.
       const pauseNewBuys = marketPausedForBuys || sidePaused;
+      const pauseMmAsks = pauseNewBuys;
 
       const widen = side === 'YES' ? yesWiden : noWiden;
       const spreadMult = widen ? 2.5 : 1;
       const quoteMult = widen ? 0.4 : 1;
       const levelCount = mmLevelCountForSide(doc, optionKey, side, quoteMult);
       const spreadBps = (ob.spreadBps ?? 80) * spreadMult;
-      const mid = midForOutcome(doc, optionKey, side);
-      const { bids, asks } = buildLevelPrices({ ...ob, spreadBps }, mid, levelCount);
+
+      const mid = await resolveQuoteMid({
+        doc,
+        optionKey,
+        side,
+        chainMarketId,
+        mmWalletLower,
+        preferTarget,
+      });
+
+      // If resting MM quotes are centered far from live fair mid, cancel and repost.
+      if (!preferTarget) {
+        const center = await mmOwnQuoteCenter({
+          chainMarketId,
+          optionKey,
+          side,
+          mmWalletLower,
+        });
+        const driftThresh = Math.max(MID_DRIFT_ABS, ((ob.spreadBps ?? 80) / 10000) * 0.75);
+        if (center != null && Math.abs(center - mid) > driftThresh) {
+          await cancelMmQuotesForOptionSide(chainMarketId, mmWalletLower, optionKey, side);
+          driftCancels += 1;
+        }
+      }
+
+      let book;
+      try {
+        book = await getBook(chainMarketId, optionKey, side);
+      } catch {
+        book = { bids: [], asks: [] };
+      }
+
+      const built = buildLevelPrices({ ...ob, spreadBps }, mid, levelCount);
+      const clamped = clampPassiveLevels(
+        built.bids,
+        built.asks,
+        book,
+        mmWalletLower,
+        built.tick,
+        preferTarget
+      );
+      const bids = clamped.bids;
+      const asks = clamped.asks;
       const { bidSizes, askSizes } = mmLevelSizesForSide(doc, optionKey, side, bids, asks, quoteMult);
 
       for (let i = 0; i < levelCount; i++) {
@@ -794,7 +995,7 @@ async function ensureQuotesForDoc(doc, kind) {
         }
       }
 
-      if (!pauseNewBuys) {
+      if (!pauseMmAsks) {
         for (let i = 0; i < levelCount; i++) {
           const askPx = asks[i];
           const qAsk = askSizes[i] ?? 1;
@@ -836,10 +1037,12 @@ async function ensureQuotesForDoc(doc, kind) {
         side,
         mmWalletLower,
         pauseNewBuys,
+        pauseMmAsks,
         placeMmOrder,
         basePayload,
         spreadMult,
         quoteMult,
+        preferTarget,
       });
       if (depthPlaced > 0) {
         for (let n = 0; n < depthPlaced; n++) placedIds.push('depth');
@@ -850,7 +1053,7 @@ async function ensureQuotesForDoc(doc, kind) {
   ob.mmWidenActiveYes = yesWiden;
   ob.mmWidenActiveNo = noWiden;
 
-  if (placedIds.length || widenLatchDirty || absorbedCount > 0) {
+  if (placedIds.length || widenLatchDirty || absorbedCount > 0 || driftCancels > 0) {
     ob.botLastTickAt = new Date();
     doc.orderbook = ob;
     await doc.save();
@@ -858,6 +1061,7 @@ async function ensureQuotesForDoc(doc, kind) {
       ok: true,
       placedNewCount: placedIds.length,
       absorbedCount,
+      driftCancels,
       placed: placedIds,
       updatedWidenLatch: widenLatchDirty,
     };
@@ -989,5 +1193,6 @@ module.exports = {
   forceRequoteMarketMm,
   scheduleForceRequoteMarketMm,
   placeMmAbsorbLiquidityForOrder,
+  absorbUserCrossingAndPartialOrders,
   LEVELS,
 };
