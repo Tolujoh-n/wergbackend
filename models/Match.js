@@ -224,6 +224,15 @@ const matchSchema = new mongoose.Schema({
   },
 });
 
-matchSchema.index({ contractAddress: 1, marketId: 1 }, { sparse: true });
+matchSchema.index(
+  { contractAddress: 1, marketId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      marketId: { $type: 'number' },
+      contractAddress: { $type: 'string', $gt: '' },
+    },
+  }
+);
 
 module.exports = mongoose.model('Match', matchSchema);

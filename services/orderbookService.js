@@ -157,15 +157,29 @@ async function readVaultBalance(wallet) {
 async function pendingVaultDebitForWallet(walletLower) {
   const wl = String(walletLower || '').toLowerCase();
   if (!wl) return 0;
-  const resolvedIds = await getResolvedChainMarketIdSet();
-  // No contract filter: under-counting settlement locks was allowing full withdraw while fills settle.
+  // No status-only filter: under-counting settlement locks was allowing full withdraw while fills settle.
   const jobs = await SettlementOutbox.find({
     status: { $in: ['pending', 'processing', 'dead'] },
   })
     .select('legs chainMarketId contractAddress status')
     .lean();
+
+  /** @type {Map<string, Set<number>>} */
+  const resolvedByContract = new Map();
+  const resolvedFor = async (contractLower) => {
+    const key = String(contractLower || '').toLowerCase() || '__none__';
+    if (!resolvedByContract.has(key)) {
+      resolvedByContract.set(key, await getResolvedChainMarketIdSet(contractLower || undefined));
+    }
+    return resolvedByContract.get(key);
+  };
+
   let total = 0;
   for (const job of jobs) {
+    const jobContract = job.contractAddress
+      ? String(job.contractAddress).toLowerCase()
+      : orderbookContractAddressLower();
+    const resolvedIds = await resolvedFor(jobContract);
     if (resolvedIds.has(Number(job.chainMarketId))) continue;
     let net = 0;
     for (const leg of job.legs || []) {
@@ -224,13 +238,12 @@ async function computeBuyReservedUsd(order, fees, restingSellsBook) {
 
 async function openBuyOrderReservedUsd(walletLower) {
   const fees = await getFees();
-  const resolvedIds = await getResolvedChainMarketIdSet();
   const wl = String(walletLower || '').toLowerCase();
   const c = orderbookContractAddressLower();
   if (!wl) return 0;
 
-  // Do NOT require contractAddress match here. Open buys on this wallet lock THIS vault;
-  // a mismatched/missing contractAddress previously caused Reserved=$0 while orders still showed.
+  // Always lock open buys — even if a marketId appears in a resolved set.
+  // (Duplicate marketIds + resolved siblings previously zeroed Reserved incorrectly.)
   const orders = await Order.find({
     walletAddress: wl,
     direction: 'buy',
@@ -244,7 +257,6 @@ async function openBuyOrderReservedUsd(walletLower) {
 
   if (!orders.length) return 0;
 
-  // Prefer current-contract / legacy rows; if none, still lock any open buys for this wallet.
   let scoped = orders;
   if (c) {
     const preferred = orders.filter((o) => {
@@ -256,13 +268,11 @@ async function openBuyOrderReservedUsd(walletLower) {
 
   const keySet = new Set();
   for (const o of scoped) {
-    if (resolvedIds.has(Number(o.chainMarketId))) continue;
     if (o.orderKind === 'limit') keySet.add(orderSideBookKey(o.chainMarketId, o.optionKey, o.side));
   }
   const bookCache = await sellBookCacheForKeys(keySet);
   let total = 0;
   for (const o of scoped) {
-    if (resolvedIds.has(Number(o.chainMarketId))) continue;
     const book =
       o.orderKind === 'limit' ? bookCache.get(orderSideBookKey(o.chainMarketId, o.optionKey, o.side)) : null;
     total += await computeBuyReservedUsd(o, fees, book);
@@ -1070,17 +1080,58 @@ async function expireStaleOrders() {
   );
 }
 
-function midFromBookSide(bids, asks) {
-  const bb = bids?.[0]?.limitPrice != null ? Number(bids[0].limitPrice) : null;
-  const ba = asks?.[0]?.limitPrice != null ? Number(asks[0].limitPrice) : null;
-  if (bb != null && ba != null) return (bb + ba) / 2;
-  if (ba != null) return ba;
-  if (bb != null) return bb;
+/**
+ * Size-weighted mid from top `depth` bid/ask levels (Polymarket-style stable fair).
+ * Ignores crossed books (bestBid >= bestAsk) for mid; falls back to last available side.
+ */
+function depthWeightedMidFromBookSide(bids, asks, depth = 3) {
+  const n = Math.max(1, Math.min(10, Number(depth) || 3));
+  const topBids = (bids || []).slice(0, n);
+  const topAsks = (asks || []).slice(0, n);
+
+  const bestBid = topBids[0]?.limitPrice != null ? Number(topBids[0].limitPrice) : null;
+  const bestAsk = topAsks[0]?.limitPrice != null ? Number(topAsks[0].limitPrice) : null;
+
+  function weighted(rows) {
+    let notional = 0;
+    let sizeSum = 0;
+    for (const r of rows) {
+      const px = Number(r.limitPrice);
+      const sz = Number(r.sizeRemaining) || 0;
+      // Ignore dust (< $0.50 notional) so tiny spoof bids cannot pin the mid.
+      if (!Number.isFinite(px) || !(sz > 1e-9) || px * sz < 0.5) continue;
+      notional += px * sz;
+      sizeSum += sz;
+    }
+    if (sizeSum <= 1e-9) return null;
+    return notional / sizeSum;
+  }
+
+  // Crossed / locked book: do not invent a mid from crossed top-of-book.
+  // Prefer size-weighted ask (offer) then bid — then null so callers can fall back.
+  if (bestBid != null && bestAsk != null && bestBid >= bestAsk - 1e-9) {
+    const wa = weighted(topAsks);
+    const wb = weighted(topBids);
+    if (wa != null) return wa;
+    if (wb != null) return wb;
+    return null;
+  }
+
+  const wb = weighted(topBids);
+  const wa = weighted(topAsks);
+  if (wb != null && wa != null) return (wb + wa) / 2;
+  if (wa != null) return wa;
+  if (wb != null) return wb;
   return null;
 }
 
+function midFromBookSide(bids, asks) {
+  return depthWeightedMidFromBookSide(bids, asks, 3);
+}
+
 /**
- * Implied win probability per outcome from YES/NO mids (normalized to sum ≈ 1).
+ * Implied win probability per outcome from YES/NO depth-weighted mids (normalized to sum ≈ 1).
+ * Blends YES mid with (1 − NO mid) when both exist for a more stable Polymarket-like chance.
  */
 async function impliedProbabilityByOption(chainMarketId, optionKeys, startingPricesRows = []) {
   const keys = (optionKeys || []).map((k) => String(k).trim()).filter(Boolean);
@@ -1094,9 +1145,12 @@ async function impliedProbabilityByOption(chainMarketId, optionKeys, startingPri
         getBook(chainMarketId, key, 'YES'),
         getBook(chainMarketId, key, 'NO'),
       ]);
-      const yesMid = midFromBookSide(yesBook.bids, yesBook.asks);
-      const noMid = midFromBookSide(noBook.bids, noBook.asks);
-      if (yesMid != null) p = yesMid;
+      const yesMid = depthWeightedMidFromBookSide(yesBook.bids, yesBook.asks, 3);
+      const noMid = depthWeightedMidFromBookSide(noBook.bids, noBook.asks, 3);
+      if (yesMid != null && noMid != null) {
+        // Complement blend reduces one-sided / stale-quote skew.
+        p = 0.5 * yesMid + 0.5 * (1 - noMid);
+      } else if (yesMid != null) p = yesMid;
       else if (noMid != null) p = 1 - noMid;
     } catch {
       /* book may be empty */
@@ -1194,10 +1248,19 @@ async function getMarketSnapshot(chainMarketId, optionKeys, startingPricesRows =
 
   const raw = {};
   for (const key of keys) {
-    const yesMid = midFromBookSide(booksByOption[key]?.YES?.bids, booksByOption[key]?.YES?.asks);
-    const noMid = midFromBookSide(booksByOption[key]?.NO?.bids, booksByOption[key]?.NO?.asks);
+    const yesMid = depthWeightedMidFromBookSide(
+      booksByOption[key]?.YES?.bids,
+      booksByOption[key]?.YES?.asks,
+      3
+    );
+    const noMid = depthWeightedMidFromBookSide(
+      booksByOption[key]?.NO?.bids,
+      booksByOption[key]?.NO?.asks,
+      3
+    );
     let p = null;
-    if (yesMid != null) p = yesMid;
+    if (yesMid != null && noMid != null) p = 0.5 * yesMid + 0.5 * (1 - noMid);
+    else if (yesMid != null) p = yesMid;
     else if (noMid != null) p = 1 - noMid;
     if (p == null) {
       const row = (startingPricesRows || []).find((r) => String(r.optionKey) === key);
@@ -1244,6 +1307,7 @@ module.exports = {
   estimateBuyLimitVaultNeedUsdFromBook,
   estimateImmediatelyMatchableSellShares,
   midFromBookSide,
+  depthWeightedMidFromBookSide,
   impliedProbabilityByOption,
   getOrderbookMarketActivity,
   getMarketSnapshot,

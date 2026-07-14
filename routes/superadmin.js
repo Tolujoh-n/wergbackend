@@ -259,11 +259,14 @@ router.post('/orderbook/finalize-market', async (req, res) => {
       if (!item.isResolved) return res.status(400).json({ message: 'Poll is not resolved' });
     } else if (chainMarketId != null) {
       const mid = Number(chainMarketId);
-      item =
-        (await Match.findOne({ marketId: mid, isResolved: true })) ||
-        (await Poll.findOne({ marketId: mid, isResolved: true }));
+      const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
+      const c = orderbookContractAddressLower();
+      const q = c ? { marketId: mid, contractAddress: c, isResolved: true } : { marketId: mid, isResolved: true };
+      item = (await Match.findOne(q)) || (await Poll.findOne(q));
       if (!item) {
-        return res.status(404).json({ message: 'No resolved match/poll for chainMarketId' });
+        return res.status(404).json({
+          message: 'No resolved match/poll for chainMarketId on current contract',
+        });
       }
     } else {
       return res.status(400).json({ message: 'chainMarketId, matchId, or pollId required' });

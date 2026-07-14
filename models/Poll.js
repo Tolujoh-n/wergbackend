@@ -209,6 +209,15 @@ const pollSchema = new mongoose.Schema({
   },
 });
 
-pollSchema.index({ contractAddress: 1, marketId: 1 }, { sparse: true });
+pollSchema.index(
+  { contractAddress: 1, marketId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      marketId: { $type: 'number' },
+      contractAddress: { $type: 'string', $gt: '' },
+    },
+  }
+);
 
 module.exports = mongoose.model('Poll', pollSchema);

@@ -17,6 +17,7 @@ const {
   sellBookCacheForKeys,
   isOptionSidePaused,
   midFromBookSide,
+  depthWeightedMidFromBookSide,
 } = require('./orderbookService');
 const { isCrossingOrder } = require('./orderbookTradingPanel');
 const { mmLevelSizesForSide, mmLevelCountForSide, sideVolumeUsdc } = require('../utils/mmQuoteVolume');
@@ -95,21 +96,35 @@ function midForOutcome(doc, optionKey, side) {
 }
 
 /**
- * Fair mid for MM quotes after the market is live:
- * 1) mid from non-MM resting orders (where users are actually bidding/asking)
- * 2) else last trade price on this outcome/side (moves mid after buys/sells)
- * 3) else full book mid
- * 4) else admin startingPrices
+ * Size of external (non-MM) depth used for mid — top `depth` levels.
+ */
+function externalDepthSize(rows, depth = 3) {
+  const n = Math.max(1, Math.min(10, Number(depth) || 3));
+  let sizeSum = 0;
+  for (const r of (rows || []).slice(0, n)) {
+    const sz = Number(r.sizeRemaining) || 0;
+    if (sz > 1e-9) sizeSum += sz;
+  }
+  return sizeSum;
+}
+
+/**
+ * Fair mid for MM quotes after the market is live (Polymarket-style):
+ * depth-weighted top-3 mid from non-MM orders, blended with complement of
+ * the other side. Never anchors on the MM's own quotes (self-reinforcing drift).
  *
- * Admin force-requote uses target mid explicitly so new odds can be pulled into the book.
+ * PreferTarget (admin force-requote) posts at startingPrices to pull odds.
  */
 async function resolveQuoteMid({ doc, optionKey, side, chainMarketId, mmWalletLower, preferTarget = false }) {
   const target = targetMidForOutcome(doc, optionKey, side);
   if (preferTarget) return target;
 
   let book;
+  let otherBook = { bids: [], asks: [] };
   try {
     book = await getBook(chainMarketId, optionKey, side);
+    const otherSide = side === 'YES' ? 'NO' : 'YES';
+    otherBook = await getBook(chainMarketId, optionKey, otherSide);
   } catch {
     book = { bids: [], asks: [] };
   }
@@ -118,35 +133,97 @@ async function resolveQuoteMid({ doc, optionKey, side, chainMarketId, mmWalletLo
   const isMm = (r) => String(r?.walletAddress || '').toLowerCase() === wl;
   const extBids = (book.bids || []).filter((r) => !isMm(r));
   const extAsks = (book.asks || []).filter((r) => !isMm(r));
-  const extMid = midFromBookSide(extBids, extAsks);
-  if (extMid != null && Number.isFinite(extMid)) {
-    return Math.max(0.01, Math.min(0.99, extMid));
+  const extOtherBids = (otherBook.bids || []).filter((r) => !isMm(r));
+  const extOtherAsks = (otherBook.asks || []).filter((r) => !isMm(r));
+
+  const thisDepth = externalDepthSize(extBids) + externalDepthSize(extAsks);
+  const otherDepth = externalDepthSize(extOtherBids) + externalDepthSize(extOtherAsks);
+  const thisMid = depthWeightedMidFromBookSide(extBids, extAsks, 3);
+  const otherMid = depthWeightedMidFromBookSide(extOtherBids, extOtherAsks, 3);
+
+  let fair = null;
+  if (thisMid != null && otherMid != null) {
+    // Complement blend (YES ≈ 1 − NO) reduces one-sided spoof/thin-book skew.
+    fair = 0.5 * thisMid + 0.5 * (1 - otherMid);
+  } else if (thisMid != null) {
+    fair = thisMid;
+  } else if (otherMid != null) {
+    fair = 1 - otherMid;
   }
 
-  try {
-    const lastFill = await OrderbookFill.findOne(
-      withOrderbookContract({
-        chainMarketId,
-        optionKey: String(optionKey),
-        side,
-      })
-    )
-      .sort({ filledAt: -1 })
-      .select('price filledAt')
-      .lean();
-    const px = Number(lastFill?.price);
-    if (Number.isFinite(px) && px > 0 && px < 1) {
-      return Math.max(0.01, Math.min(0.99, px));
+  // Thin or empty external book: do not chase tape / own quotes — stay near admin target.
+  const MIN_EXT_DEPTH = 5; // shares
+  const thin = thisDepth + otherDepth < MIN_EXT_DEPTH;
+
+  if (fair == null || thin) {
+    let lastPx = null;
+    try {
+      const lastFill = await OrderbookFill.findOne(
+        withOrderbookContract({
+          chainMarketId,
+          optionKey: String(optionKey),
+          side,
+        })
+      )
+        .sort({ filledAt: -1 })
+        .select('price filledAt')
+        .lean();
+      const px = Number(lastFill?.price);
+      if (Number.isFinite(px) && px > 0 && px < 1) lastPx = px;
+    } catch {
+      /* ignore tape errors */
     }
-  } catch {
-    /* ignore tape errors */
+    if (fair == null && lastPx != null) {
+      // Tape alone is noisy; never use it without pulling hard to target.
+      fair = 0.25 * lastPx + 0.75 * target;
+    } else if (fair == null) {
+      fair = target;
+    } else if (thin) {
+      // Sparse external interest: mostly target so odds stay Polymarket-coherent.
+      fair = 0.35 * fair + 0.65 * target;
+    }
+  } else if (Number.isFinite(target)) {
+    // Healthy external depth: mostly follow the market, soft pull to target.
+    fair = 0.85 * fair + 0.15 * target;
   }
 
-  const fullMid = midFromBookSide(book.bids, book.asks);
-  if (fullMid != null && Number.isFinite(fullMid)) {
-    return Math.max(0.01, Math.min(0.99, fullMid));
+  if (fair != null && Number.isFinite(fair)) {
+    return Math.max(0.01, Math.min(0.99, fair));
   }
   return target;
+}
+
+/**
+ * Polymarket-style coherent mids: outcome YES probs sum ≈ 1, and NO = 1 − YES per outcome.
+ */
+async function resolveCoherentMids({
+  doc,
+  optionKeys,
+  chainMarketId,
+  mmWalletLower,
+  preferTarget = false,
+}) {
+  const yesRaw = {};
+  for (const optionKey of optionKeys) {
+    yesRaw[optionKey] = await resolveQuoteMid({
+      doc,
+      optionKey,
+      side: 'YES',
+      chainMarketId,
+      mmWalletLower,
+      preferTarget,
+    });
+  }
+  const sum = Object.values(yesRaw).reduce((a, b) => a + b, 0) || 1;
+  const out = {};
+  for (const optionKey of optionKeys) {
+    const yes = Math.max(0.01, Math.min(0.99, yesRaw[optionKey] / sum));
+    out[optionKey] = {
+      YES: yes,
+      NO: Math.max(0.01, Math.min(0.99, 1 - yes)),
+    };
+  }
+  return out;
 }
 
 /** Center of this MM wallet's resting quotes (for drift detection). */
@@ -214,8 +291,13 @@ function clampPassiveLevels(bids, asks, book, mmWalletLower, tick, allowCross) {
   if (allowCross) return { bids, asks };
   const wl = String(mmWalletLower || '').toLowerCase();
   const isMm = (r) => String(r?.walletAddress || '').toLowerCase() === wl;
-  const extBids = (book?.bids || []).filter((r) => !isMm(r));
-  const extAsks = (book?.asks || []).filter((r) => !isMm(r));
+  const significant = (r) => {
+    const px = Number(r?.limitPrice);
+    const sz = Number(r?.sizeRemaining) || 0;
+    return Number.isFinite(px) && sz > 1e-9 && px * sz >= 0.5;
+  };
+  const extBids = (book?.bids || []).filter((r) => !isMm(r) && significant(r));
+  const extAsks = (book?.asks || []).filter((r) => !isMm(r) && significant(r));
   const bestExtBid = extBids[0]?.limitPrice != null ? Number(extBids[0].limitPrice) : null;
   const bestExtAsk = extAsks[0]?.limitPrice != null ? Number(extAsks[0].limitPrice) : null;
   const t = Math.max(0.005, Number(tick) || 0.005);
@@ -616,12 +698,25 @@ async function mmTreasuryMarkToMidLossUsdc({ chainMarketId, mmWalletLower }) {
 
 async function cancelMmQuotesForOptionSide(chainMarketId, mmWalletLower, optionKey, side) {
   await Order.updateMany(
-    withOrderbookContract({
+    withOrderbookContractOrLegacy({
       chainMarketId,
       walletAddress: mmWalletLower,
       isMarketMaker: true,
       optionKey,
       side,
+      status: { $in: ['open', 'partially_filled', 'pending'] },
+    }),
+    { $set: { status: 'cancelled', reservedCollateral: 0, sizeRemaining: 0 } }
+  );
+}
+
+/** Cancel every resting MM quote on a chain market (all outcomes / sides). */
+async function cancelAllMmQuotesForMarket(chainMarketId, mmWalletLower) {
+  await Order.updateMany(
+    withOrderbookContractOrLegacy({
+      chainMarketId,
+      walletAddress: mmWalletLower,
+      isMarketMaker: true,
       status: { $in: ['open', 'partially_filled', 'pending'] },
     }),
     { $set: { status: 'cancelled', reservedCollateral: 0, sizeRemaining: 0 } }
@@ -690,12 +785,19 @@ async function forceRequoteMarketMm(doc, kind) {
     return { skipped: true, reason: 'MM actor or marketId missing' };
   }
   const mmWalletLower = String(actor.walletAddress).toLowerCase();
-  const optionKeys = kind === 'match' ? matchOptionKeys(doc) : pollOptionKeys(doc);
-  for (const optionKey of optionKeys) {
-    for (const side of ['YES', 'NO']) {
-      await cancelMmQuotesForOptionSide(doc.marketId, mmWalletLower, optionKey, side);
-    }
-  }
+  // Full wipe (incl. leftover Draw books from reused marketIds) then target requote.
+  await cancelAllMmQuotesForMarket(doc.marketId, mmWalletLower);
+
+  const Model = kind === 'match' ? Match : Poll;
+  const latchMs = Math.max(
+    30_000,
+    parseInt(process.env.MM_PREFER_TARGET_LATCH_MS || '180000', 10) || 180_000
+  );
+  await Model.updateOne(
+    { _id: doc._id },
+    { $set: { 'orderbook.mmPreferTargetUntil': new Date(Date.now() + latchMs) } }
+  );
+
   // Prefer admin target mids so saving new odds pulls the book toward that target.
   return ensureQuotesForDoc(doc, kind, { preferTarget: true });
 }
@@ -716,7 +818,7 @@ function scheduleForceRequoteMarketMm({ kind, id }) {
 
 async function cancelMmQuotesForChainSide(chainMarketId, mmWalletLower, side) {
   await Order.updateMany(
-    withOrderbookContract({
+    withOrderbookContractOrLegacy({
       chainMarketId,
       walletAddress: mmWalletLower,
       isMarketMaker: true,
@@ -805,7 +907,7 @@ async function syncOrderbookRiskToDb(item, kind) {
  * the CLOB matcher uses MongoDB orders — this is what makes market orders work.
  */
 async function ensureQuotesForDoc(doc, kind, opts = {}) {
-  const preferTarget = opts.preferTarget === true;
+  let preferTarget = opts.preferTarget === true;
   const actor = await getMarketMakerActor();
   if (!actor) {
     return { skipped: true, reason: 'MARKET_MAKER_USER_ID or linked wallet missing' };
@@ -819,11 +921,18 @@ async function ensureQuotesForDoc(doc, kind, opts = {}) {
   doc = freshDoc;
 
   const ob0 = doc.orderbook || {};
-  if (ob0.botEnabled === false) {
+  // preferTarget / force still posts when bot is paused (ops can pause production cron pollution).
+  if (ob0.botEnabled === false && !preferTarget && opts.force !== true) {
     return { skipped: true, reason: 'bot disabled' };
   }
   if (!doc.marketId) {
     return { skipped: true, reason: 'no chain marketId' };
+  }
+
+  // After admin/force requote, keep posting at targets until latch expires (beats concurrent live ticks).
+  const latchUntil = ob0.mmPreferTargetUntil ? new Date(ob0.mmPreferTargetUntil).getTime() : 0;
+  if (!preferTarget && latchUntil > Date.now()) {
+    preferTarget = true;
   }
 
   const matchId = kind === 'match' ? doc._id : undefined;
@@ -895,23 +1004,36 @@ async function ensureQuotesForDoc(doc, kind, opts = {}) {
   };
 
   let absorbedCount = 0;
-  try {
-    const absorbRes = await absorbUserCrossingAndPartialOrders({
-      doc,
-      kind,
-      actor,
-      ob,
-      riskPausedYes,
-      riskPausedNo,
-      matchId,
-      pollId,
-    });
-    absorbedCount = absorbRes.absorbed || 0;
-  } catch (e) {
-    console.warn('[marketMakerQuotes] absorb batch', doc.marketId, e.message || e);
+  // On force target requote, wipe any concurrent bot quotes first, place clean book, then absorb.
+  if (preferTarget) {
+    await cancelAllMmQuotesForMarket(chainMarketId, mmWalletLower);
+  } else {
+    try {
+      const absorbRes = await absorbUserCrossingAndPartialOrders({
+        doc,
+        kind,
+        actor,
+        ob,
+        riskPausedYes,
+        riskPausedNo,
+        matchId,
+        pollId,
+      });
+      absorbedCount = absorbRes.absorbed || 0;
+    } catch (e) {
+      console.warn('[marketMakerQuotes] absorb batch', doc.marketId, e.message || e);
+    }
   }
 
   let driftCancels = 0;
+
+  const coherentMids = await resolveCoherentMids({
+    doc,
+    optionKeys,
+    chainMarketId,
+    mmWalletLower,
+    preferTarget,
+  });
 
   for (const optionKey of optionKeys) {
     for (const side of ['YES', 'NO']) {
@@ -927,17 +1049,19 @@ async function ensureQuotesForDoc(doc, kind, opts = {}) {
       const levelCount = mmLevelCountForSide(doc, optionKey, side, quoteMult);
       const spreadBps = (ob.spreadBps ?? 80) * spreadMult;
 
-      const mid = await resolveQuoteMid({
-        doc,
-        optionKey,
-        side,
-        chainMarketId,
-        mmWalletLower,
-        preferTarget,
-      });
+      const mid = coherentMids[optionKey]?.[side] ?? targetMidForOutcome(doc, optionKey, side);
 
-      // If resting MM quotes are centered far from live fair mid, cancel and repost.
+      // If resting MM quotes are centered far from live fair mid, OR the book is crossed, cancel and repost.
       if (!preferTarget) {
+        let liveBook;
+        try {
+          liveBook = await getBook(chainMarketId, optionKey, side);
+        } catch {
+          liveBook = { bids: [], asks: [] };
+        }
+        const bb = liveBook.bids?.[0]?.limitPrice != null ? Number(liveBook.bids[0].limitPrice) : null;
+        const ba = liveBook.asks?.[0]?.limitPrice != null ? Number(liveBook.asks[0].limitPrice) : null;
+        const crossed = bb != null && ba != null && bb >= ba - 1e-9;
         const center = await mmOwnQuoteCenter({
           chainMarketId,
           optionKey,
@@ -945,10 +1069,13 @@ async function ensureQuotesForDoc(doc, kind, opts = {}) {
           mmWalletLower,
         });
         const driftThresh = Math.max(MID_DRIFT_ABS, ((ob.spreadBps ?? 80) / 10000) * 0.75);
-        if (center != null && Math.abs(center - mid) > driftThresh) {
+        if (crossed || (center != null && Math.abs(center - mid) > driftThresh)) {
           await cancelMmQuotesForOptionSide(chainMarketId, mmWalletLower, optionKey, side);
           driftCancels += 1;
         }
+      } else {
+        // PreferTarget: cancel this side again so concurrent ticks cannot leave stale levels.
+        await cancelMmQuotesForOptionSide(chainMarketId, mmWalletLower, optionKey, side);
       }
 
       let book;
@@ -1047,6 +1174,24 @@ async function ensureQuotesForDoc(doc, kind, opts = {}) {
       if (depthPlaced > 0) {
         for (let n = 0; n < depthPlaced; n++) placedIds.push('depth');
       }
+    }
+  }
+
+  if (preferTarget) {
+    try {
+      const absorbRes = await absorbUserCrossingAndPartialOrders({
+        doc,
+        kind,
+        actor,
+        ob,
+        riskPausedYes,
+        riskPausedNo,
+        matchId,
+        pollId,
+      });
+      absorbedCount = absorbRes.absorbed || 0;
+    } catch (e) {
+      console.warn('[marketMakerQuotes] absorb after target requote', doc.marketId, e.message || e);
     }
   }
 
@@ -1194,5 +1339,8 @@ module.exports = {
   scheduleForceRequoteMarketMm,
   placeMmAbsorbLiquidityForOrder,
   absorbUserCrossingAndPartialOrders,
+  resolveQuoteMid,
+  resolveCoherentMids,
+  cancelAllMmQuotesForMarket,
   LEVELS,
 };

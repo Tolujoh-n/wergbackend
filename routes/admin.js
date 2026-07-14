@@ -15,6 +15,38 @@ const { uploadImage, deleteImage } = require('../utils/cloudinary');
 const { scheduleMarketMakerSeed } = require('../services/marketMakerQuotes');
 const { normalizeStartingPricesRows } = require('../utils/targetOdds');
 const { orderbookContractAddressLower } = require('../utils/orderbookContractScope');
+
+/**
+ * marketId is unique per WeRgame deployment (contractAddress), not globally.
+ * Reject attaching an already-used (contract, marketId) to a different match/poll.
+ */
+async function assertMarketIdFreeOnContract({ marketId, contractAddress, excludeMatchId, excludePollId }) {
+  const mid = marketId != null ? parseInt(marketId, 10) : NaN;
+  if (!Number.isFinite(mid)) return;
+  const c = contractAddress || orderbookContractAddressLower();
+  if (!c) return;
+  const q = { marketId: mid, contractAddress: c };
+  const [m, p] = await Promise.all([
+    Match.findOne(excludeMatchId ? { ...q, _id: { $ne: excludeMatchId } } : q)
+      .select('_id teamA teamB')
+      .lean(),
+    Poll.findOne(excludePollId ? { ...q, _id: { $ne: excludePollId } } : q)
+      .select('_id question')
+      .lean(),
+  ]);
+  if (m) {
+    const err = new Error(
+      `marketId ${mid} already used on this contract by match ${m.teamA} vs ${m.teamB}`
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+  if (p) {
+    const err = new Error(`marketId ${mid} already used on this contract by poll "${p.question}"`);
+    err.statusCode = 409;
+    throw err;
+  }
+}
 const { resolveUserByIdentifier } = require('../utils/resolveUserByIdentifier');
 const { awardGoldenTickets } = require('../services/ticketService');
 const {
@@ -538,6 +570,12 @@ router.post('/matches', async (req, res) => {
       return r ? (r.yes || 0) + (r.no || 0) : 0;
     };
 
+    const marketIdNum = marketId ? parseInt(marketId, 10) : undefined;
+    const contractLower = orderbookContractAddressLower();
+    if (marketIdNum != null) {
+      await assertMarketIdFreeOnContract({ marketId: marketIdNum, contractAddress: contractLower });
+    }
+
     const match = new Match({
       teamA,
       teamB,
@@ -546,8 +584,8 @@ router.post('/matches', async (req, res) => {
       stage: stageDoc?._id,
       stageName: stageDoc?.name || stageName,
       description: description ? String(description).trim() : '',
-      marketId: marketId ? parseInt(marketId, 10) : undefined,
-      ...(orderbookContractAddressLower() ? { contractAddress: orderbookContractAddressLower() } : {}),
+      marketId: marketIdNum,
+      ...(contractLower ? { contractAddress: contractLower } : {}),
       // Legacy liquidity fields kept for backward compatibility; we store sum(YES+NO) per outcome here.
       marketTeamALiquidity: (marketTeamALiquidity || 0) + sumFor('TeamA'),
       marketTeamBLiquidity: (marketTeamBLiquidity || 0) + sumFor('TeamB'),
@@ -589,7 +627,7 @@ router.post('/matches', async (req, res) => {
 
     res.status(201).json(match);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({ message: error.message });
   }
 });
 
@@ -1055,6 +1093,12 @@ router.post('/polls', async (req, res) => {
       stageDoc = typeof stage === 'string' ? await Stage.findById(stage) : stage;
     }
 
+    const marketIdNum = marketId ? parseInt(marketId, 10) : undefined;
+    const contractLower = orderbookContractAddressLower();
+    if (marketIdNum != null) {
+      await assertMarketIdFreeOnContract({ marketId: marketIdNum, contractAddress: contractLower });
+    }
+
     const pollData = {
       question,
       description,
@@ -1063,8 +1107,8 @@ router.post('/polls', async (req, res) => {
       cup: cupDoc._id,
       stage: stageDoc?._id,
       date: date && String(date).trim() !== '' ? new Date(date) : undefined,
-      marketId: marketId ? parseInt(marketId, 10) : undefined,
-      ...(orderbookContractAddressLower() ? { contractAddress: orderbookContractAddressLower() } : {}),
+      marketId: marketIdNum,
+      ...(contractLower ? { contractAddress: contractLower } : {}),
       minFreeTickets: Math.max(1, parseInt(minFreeTickets, 10) || 1),
       freePredictionEnabled: freePredictionEnabled !== false,
       marketEnabled: marketEnabled !== false,
@@ -1121,7 +1165,7 @@ router.post('/polls', async (req, res) => {
 
     res.status(201).json(poll);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({ message: error.message });
   }
 });
 
