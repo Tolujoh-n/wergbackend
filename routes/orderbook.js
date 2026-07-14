@@ -9,6 +9,8 @@ const {
   getBook,
   readVaultBalance,
   reservedCollateralForWallet,
+  openBuyOrderReservedUsd,
+  pendingVaultDebitForWallet,
   getOrderbookDefaults,
   getFees,
   positionKey,
@@ -60,14 +62,56 @@ router.get('/vault', auth, async (req, res) => {
         code: 'WALLET_NOT_LINKED',
       });
     }
-    const [vault, reserved] = await Promise.all([readVaultBalance(w), reservedCollateralForWallet(wl)]);
+
+    const openFilter = {
+      walletAddress: wl,
+      status: { $in: ['pending', 'open', 'partially_filled'] },
+      sizeRemaining: { $gt: 1e-9 },
+    };
+
+    const [vault, openBuyReserve, pendingSettle, openBuyCount, openSellCount, allLinkedLinks] =
+      await Promise.all([
+        readVaultBalance(w),
+        openBuyOrderReservedUsd(wl),
+        pendingVaultDebitForWallet(wl),
+        Order.countDocuments({ ...openFilter, direction: 'buy' }),
+        Order.countDocuments({ ...openFilter, direction: 'sell' }),
+        WalletLink.find({ user: req.user._id }).select('walletAddress').lean(),
+      ]);
+
+    // Buys on other linked wallets (panel shows them; this wallet's vault does not lock them).
+    const otherWallets = (allLinkedLinks || [])
+      .map((l) => String(l.walletAddress || '').toLowerCase())
+      .filter((a) => a && a !== wl);
+    let openBuysOnOtherLinkedWallets = 0;
+    if (otherWallets.length) {
+      openBuysOnOtherLinkedWallets = await Order.countDocuments({
+        walletAddress: { $in: otherWallets },
+        direction: 'buy',
+        status: { $in: ['pending', 'open', 'partially_filled'] },
+        sizeRemaining: { $gt: 1e-9 },
+      });
+    }
+
+    const reserved = parseFloat((openBuyReserve + pendingSettle).toFixed(6));
     res.json({
       walletAddress: w,
       onChainVaultUsdc: vault,
       reservedUsdc: reserved,
+      openBuyOrdersReservedUsdc: openBuyReserve,
+      openBuyOrderCount: openBuyCount,
+      openSellOrderCount: openSellCount,
+      openBuysOnOtherLinkedWallets,
+      pendingSettlementUsdc: pendingSettle,
       availableUsdc: Math.max(0, vault - reserved),
       contractAddress: getContractAddress(),
       walletLinked: true,
+      note:
+        openBuyCount === 0 && openSellCount > 0
+          ? 'Open orders on this wallet are sells — sells do not reserve vault USDC (they use shares).'
+          : openBuyCount === 0 && openBuysOnOtherLinkedWallets > 0
+            ? 'Open buys exist on another linked wallet; connect that wallet to see Reserved on its vault.'
+            : undefined,
     });
   } catch (e) {
     res.status(500).json({ message: e.message });

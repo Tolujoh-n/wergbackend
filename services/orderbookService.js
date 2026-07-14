@@ -75,12 +75,12 @@ async function sellBookCacheForKeys(keySet) {
     keys.map(async (key) => {
       const [chainMarketId, optionKey, side] = JSON.parse(key);
       const resting = await Order.find(
-        withOrderbookContract({
+        withOrderbookContractOrLegacy({
           chainMarketId,
           optionKey,
           side,
           direction: 'sell',
-          status: { $in: ['open', 'partially_filled'] },
+          status: { $in: ['open', 'partially_filled', 'pending'] },
         })
       )
         .sort({ limitPrice: 1, createdAt: 1 })
@@ -119,38 +119,17 @@ function estimateBuyLimitVaultNeedUsdFromBook(resting, walletLower, size, limitP
 
 async function estimateBuyLimitVaultNeedUsd(chainMarketId, optionKey, side, walletLower, size, limitPx, fees) {
   const resting = await Order.find(
-    withOrderbookContract({
+    withOrderbookContractOrLegacy({
       chainMarketId,
       optionKey,
       side,
       direction: 'sell',
-      status: { $in: ['open', 'partially_filled'] },
+      status: { $in: ['open', 'partially_filled', 'pending'] },
     })
   )
     .sort({ limitPrice: 1, createdAt: 1 })
     .lean();
   return estimateBuyLimitVaultNeedUsdFromBook(resting, walletLower, size, limitPx, fees);
-}
-
-/**
- * Worst-case vault USDC still locked for an open/partial buy order (must match placeOrder / runMatch).
- * @param {unknown[]|null|undefined} restingSellsBook — when set, skips DB (batch vault / MM paths).
- */
-async function computeBuyReservedUsd(order, fees, restingSellsBook) {
-  if (!order || order.direction !== 'buy') return 0;
-  const rem = Number(order.sizeRemaining);
-  if (!Number.isFinite(rem) || rem <= 1e-9) return 0;
-  if (order.orderKind === 'market') {
-    const px = Number(order.limitPrice);
-    if (!Number.isFinite(px) || px <= 0) return 0;
-    return parseFloat((rem * px).toFixed(6));
-  }
-  const w = String(order.walletAddress || '').toLowerCase();
-  const lim = Number(order.limitPrice);
-  if (restingSellsBook != null) {
-    return estimateBuyLimitVaultNeedUsdFromBook(restingSellsBook, w, rem, lim, fees);
-  }
-  return await estimateBuyLimitVaultNeedUsd(order.chainMarketId, order.optionKey, order.side, w, rem, lim, fees);
 }
 
 function mergeControl(item) {
@@ -171,25 +150,26 @@ async function readVaultBalance(wallet) {
   return unitsToFloat(bal);
 }
 
-/** USDC not yet debited on-chain but committed in a pending/processing settlement batch (net per job). */
+/**
+ * USDC not yet debited on-chain but committed in settlement batches.
+ * Includes `dead` jobs so failed on-chain settles still block withdrawal until fixed.
+ */
 async function pendingVaultDebitForWallet(walletLower) {
-  const c = orderbookContractAddressLower();
-  if (!c) return 0;
+  const wl = String(walletLower || '').toLowerCase();
+  if (!wl) return 0;
   const resolvedIds = await getResolvedChainMarketIdSet();
-  const jobs = await SettlementOutbox.find(
-    withOrderbookContract({
-      status: { $in: ['pending', 'processing'] },
-    })
-  )
-    .select('legs chainMarketId contractAddress')
+  // No contract filter: under-counting settlement locks was allowing full withdraw while fills settle.
+  const jobs = await SettlementOutbox.find({
+    status: { $in: ['pending', 'processing', 'dead'] },
+  })
+    .select('legs chainMarketId contractAddress status')
     .lean();
   let total = 0;
   for (const job of jobs) {
     if (resolvedIds.has(Number(job.chainMarketId))) continue;
-    if (job.contractAddress && String(job.contractAddress).toLowerCase() !== c) continue;
     let net = 0;
     for (const leg of job.legs || []) {
-      if (String(leg.user).toLowerCase() !== walletLower) continue;
+      if (String(leg.user || '').toLowerCase() !== wl) continue;
       try {
         net += parseFloat(ethers.formatUnits(BigInt(leg.vaultDelta || '0'), USDC_DECIMALS));
       } catch {
@@ -201,36 +181,96 @@ async function pendingVaultDebitForWallet(walletLower) {
   return parseFloat(total.toFixed(6));
 }
 
+/**
+ * Conservative USDC lock for one open buy: max(stored reserved, remainder×price×(1+fee), book estimate).
+ */
+async function computeBuyReservedUsd(order, fees, restingSellsBook) {
+  if (!order || order.direction !== 'buy') return 0;
+  const rem = Number(order.sizeRemaining);
+  if (!Number.isFinite(rem) || rem <= 1e-9) return 0;
+  const stored = Math.max(0, Number(order.reservedCollateral) || 0);
+  const feeRate = ((Number(fees?.marketPlatformFee) || 0) + (Number(fees?.freeJackpotFee) || 0)) / 100;
+  const lim = Number(order.limitPrice);
+  const simpleLock =
+    Number.isFinite(lim) && lim > 0 ? parseFloat((rem * lim * (1 + Math.max(0, feeRate))).toFixed(6)) : 0;
+
+  if (order.orderKind === 'market') {
+    if (simpleLock > 0) return Math.max(simpleLock, stored);
+    return stored > 0 ? stored : parseFloat(rem.toFixed(6));
+  }
+
+  const w = String(order.walletAddress || '').toLowerCase();
+  let live = 0;
+  if (Number.isFinite(lim) && lim > 0) {
+    if (restingSellsBook != null) {
+      live = estimateBuyLimitVaultNeedUsdFromBook(restingSellsBook, w, rem, lim, fees);
+    } else {
+      live = await estimateBuyLimitVaultNeedUsd(
+        order.chainMarketId,
+        order.optionKey,
+        order.side,
+        w,
+        rem,
+        lim,
+        fees
+      );
+    }
+  }
+  const need = Math.max(live, simpleLock, stored);
+  if (need > 1e-9) return parseFloat(need.toFixed(6));
+  // Last resort: lock full remainder at $1/share so open buys never show $0 reserved.
+  return parseFloat(rem.toFixed(6));
+}
+
 async function openBuyOrderReservedUsd(walletLower) {
   const fees = await getFees();
   const resolvedIds = await getResolvedChainMarketIdSet();
-  const orders = await Order.find(
-    withOrderbookContract({
-      walletAddress: walletLower,
-      direction: 'buy',
-      status: { $in: ['open', 'partially_filled'] },
-      sizeRemaining: { $gt: 1e-9 },
-    })
-  )
-    .select('chainMarketId optionKey side walletAddress sizeRemaining limitPrice orderKind direction')
+  const wl = String(walletLower || '').toLowerCase();
+  const c = orderbookContractAddressLower();
+  if (!wl) return 0;
+
+  // Do NOT require contractAddress match here. Open buys on this wallet lock THIS vault;
+  // a mismatched/missing contractAddress previously caused Reserved=$0 while orders still showed.
+  const orders = await Order.find({
+    walletAddress: wl,
+    direction: 'buy',
+    status: { $in: ['pending', 'open', 'partially_filled'] },
+    sizeRemaining: { $gt: 1e-9 },
+  })
+    .select(
+      'chainMarketId optionKey side walletAddress sizeRemaining limitPrice orderKind direction reservedCollateral contractAddress'
+    )
     .lean();
+
   if (!orders.length) return 0;
+
+  // Prefer current-contract / legacy rows; if none, still lock any open buys for this wallet.
+  let scoped = orders;
+  if (c) {
+    const preferred = orders.filter((o) => {
+      const oc = o.contractAddress != null ? String(o.contractAddress).toLowerCase() : '';
+      return !oc || oc === c;
+    });
+    if (preferred.length) scoped = preferred;
+  }
+
   const keySet = new Set();
-  for (const o of orders) {
+  for (const o of scoped) {
     if (resolvedIds.has(Number(o.chainMarketId))) continue;
     if (o.orderKind === 'limit') keySet.add(orderSideBookKey(o.chainMarketId, o.optionKey, o.side));
   }
   const bookCache = await sellBookCacheForKeys(keySet);
   let total = 0;
-  for (const o of orders) {
+  for (const o of scoped) {
     if (resolvedIds.has(Number(o.chainMarketId))) continue;
-    const book = o.orderKind === 'limit' ? bookCache.get(orderSideBookKey(o.chainMarketId, o.optionKey, o.side)) : null;
+    const book =
+      o.orderKind === 'limit' ? bookCache.get(orderSideBookKey(o.chainMarketId, o.optionKey, o.side)) : null;
     total += await computeBuyReservedUsd(o, fees, book);
   }
   return parseFloat(total.toFixed(6));
 }
 
-/** Vault USDC that must not be withdrawn: open buy orders + unsettled trade debits. */
+/** Vault USDC that must not be withdrawn: open/pending buys + unsettled (or failed) trade debits. */
 async function reservedCollateralForWallet(walletLower) {
   const [openOrders, pendingSettle] = await Promise.all([
     openBuyOrderReservedUsd(walletLower),
@@ -787,7 +827,8 @@ async function placeOrder(payload) {
   let maxReserve = 0;
   if (direction === 'buy') {
     if (orderKind === 'market') {
-      maxReserve = parseFloat((sz * px).toFixed(6));
+      const feeRate = (fees.marketPlatformFee + fees.freeJackpotFee) / 100;
+      maxReserve = parseFloat((sz * px * (1 + feeRate)).toFixed(6));
     } else {
       maxReserve = await estimateBuyLimitVaultNeedUsd(item.marketId, optionKey, side, w, sz, px, fees);
     }
