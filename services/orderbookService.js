@@ -7,6 +7,7 @@ const Poll = require('../models/Poll');
 const Settings = require('../models/Settings');
 const WalletLink = require('../models/WalletLink');
 const SettlementOutbox = require('../models/SettlementOutbox');
+const OrderbookFill = require('../models/OrderbookFill');
 const { processSettlementOutboxBatch, applyLegsToOrderbookPositions } = require('./settlementOutbox');
 const { persistOrderbookFills, getOrderbookTradeTape } = require('./orderbookFills');
 const { getContractAddress, getReadJsonRpcProvider } = require('../utils/chainConfig');
@@ -1000,6 +1001,11 @@ async function placeOrder(payload) {
         console.warn('orderbook mm/risk refresh after user order:', e.message || e);
       });
     });
+    setImmediate(() => {
+      awardGoldenTicketsForOrderFills(createdId).catch((e) => {
+        console.warn('orderbook golden tickets:', e.message || e);
+      });
+    });
     return out;
   }
 
@@ -1130,8 +1136,53 @@ function midFromBookSide(bids, asks) {
 }
 
 /**
- * Implied win probability per outcome from YES/NO depth-weighted mids (normalized to sum ≈ 1).
- * Blends YES mid with (1 − NO mid) when both exist for a more stable Polymarket-like chance.
+ * Average cost of filled positions for option|side (totalInvested / shares).
+ * Anchors Chance/mid to real holdings so spoof open orders cannot dominate.
+ */
+async function positionVwapForOptionSide(chainMarketId, optionKey, side) {
+  const OrderbookPosition = require('../models/OrderbookPosition');
+  const pk = `${String(optionKey).trim()}|${String(side).trim()}`;
+  const rows = await OrderbookPosition.find(
+    withOrderbookContract({
+      chainMarketId: Number(chainMarketId),
+      positionKey: pk,
+      shares: { $gt: 1e-9 },
+    })
+  )
+    .select('shares totalInvested walletAddress')
+    .lean();
+
+  let shares = 0;
+  let invested = 0;
+  for (const r of rows) {
+    const sh = Number(r.shares) || 0;
+    const inv = Number(r.totalInvested) || 0;
+    if (!(sh > 1e-9) || !(inv > 0)) continue;
+    shares += sh;
+    invested += inv;
+  }
+  if (shares <= 1e-9 || invested <= 0) return null;
+  const vwap = invested / shares;
+  if (!Number.isFinite(vwap) || vwap <= 0 || vwap >= 1) return null;
+  return Math.max(0.01, Math.min(0.99, vwap));
+}
+
+/**
+ * Blend open-book mid with position VWAP. Positions get majority weight so
+ * resting spoof orders cannot freely move displayed Chance.
+ */
+function blendBookAndPositionMid(bookMid, positionMid) {
+  if (bookMid != null && positionMid != null) {
+    return 0.35 * bookMid + 0.65 * positionMid;
+  }
+  if (positionMid != null) return positionMid;
+  if (bookMid != null) return bookMid;
+  return null;
+}
+
+/**
+ * Implied win probability per outcome from YES/NO mids (normalized to sum ≈ 1).
+ * Prefer filled-position VWAP over thin open-order books (anti-manipulation).
  */
 async function impliedProbabilityByOption(chainMarketId, optionKeys, startingPricesRows = []) {
   const keys = (optionKeys || []).map((k) => String(k).trim()).filter(Boolean);
@@ -1141,14 +1192,17 @@ async function impliedProbabilityByOption(chainMarketId, optionKeys, startingPri
   for (const key of keys) {
     let p = null;
     try {
-      const [yesBook, noBook] = await Promise.all([
+      const [yesBook, noBook, yesPos, noPos] = await Promise.all([
         getBook(chainMarketId, key, 'YES'),
         getBook(chainMarketId, key, 'NO'),
+        positionVwapForOptionSide(chainMarketId, key, 'YES'),
+        positionVwapForOptionSide(chainMarketId, key, 'NO'),
       ]);
-      const yesMid = depthWeightedMidFromBookSide(yesBook.bids, yesBook.asks, 3);
-      const noMid = depthWeightedMidFromBookSide(noBook.bids, noBook.asks, 3);
+      const yesBookMid = depthWeightedMidFromBookSide(yesBook.bids, yesBook.asks, 3);
+      const noBookMid = depthWeightedMidFromBookSide(noBook.bids, noBook.asks, 3);
+      const yesMid = blendBookAndPositionMid(yesBookMid, yesPos);
+      const noMid = blendBookAndPositionMid(noBookMid, noPos);
       if (yesMid != null && noMid != null) {
-        // Complement blend reduces one-sided / stale-quote skew.
         p = 0.5 * yesMid + 0.5 * (1 - noMid);
       } else if (yesMid != null) p = yesMid;
       else if (noMid != null) p = 1 - noMid;
@@ -1167,6 +1221,51 @@ async function impliedProbabilityByOption(chainMarketId, optionKeys, startingPri
   const out = {};
   for (const k of Object.keys(raw)) out[k] = raw[k] / sum;
   return out;
+}
+
+/**
+ * Award golden tickets for filled USDC buys (non-MM) on this taker order + any maker buys filled.
+ */
+async function awardGoldenTicketsForOrderFills(takerOrderId) {
+  const taker = await Order.findById(takerOrderId).lean();
+  if (!taker) return;
+
+  const { getGoldenTicketMarketRate, goldenTicketsForMarketBuy, awardGoldenTickets } = require('./ticketService');
+  const rate = await getGoldenTicketMarketRate();
+  if (!(rate.tickets > 0) || !(rate.perUsdc > 0)) return;
+
+  /** @type {Map<string, number>} */
+  const buyNotionalByUser = new Map();
+
+  const credit = (userId, notional) => {
+    if (!userId || !(notional > 0)) return;
+    const uid = String(userId);
+    buyNotionalByUser.set(uid, (buyNotionalByUser.get(uid) || 0) + notional);
+  };
+
+  const fills = await OrderbookFill.find({ takerOrderId: taker._id })
+    .select('notional makerOrderId makerIsMarketMaker')
+    .lean();
+
+  if (taker.direction === 'buy' && !taker.isMarketMaker) {
+    const notion = fills.reduce((s, f) => s + (Number(f.notional) || 0), 0);
+    credit(taker.user, notion);
+  }
+
+  if (taker.direction === 'sell') {
+    for (const f of fills) {
+      if (f.makerIsMarketMaker) continue;
+      const maker = await Order.findById(f.makerOrderId).select('user direction isMarketMaker').lean();
+      if (maker && maker.direction === 'buy' && !maker.isMarketMaker) {
+        credit(maker.user, Number(f.notional) || 0);
+      }
+    }
+  }
+
+  for (const [uid, notion] of buyNotionalByUser.entries()) {
+    const tickets = goldenTicketsForMarketBuy(rate, notion);
+    if (tickets > 0) await awardGoldenTickets(uid, tickets);
+  }
 }
 
 /**
@@ -1308,6 +1407,8 @@ module.exports = {
   estimateImmediatelyMatchableSellShares,
   midFromBookSide,
   depthWeightedMidFromBookSide,
+  positionVwapForOptionSide,
+  blendBookAndPositionMid,
   impliedProbabilityByOption,
   getOrderbookMarketActivity,
   getMarketSnapshot,

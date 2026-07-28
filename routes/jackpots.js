@@ -20,7 +20,9 @@ const {
 const { verifyJackpotWithdrawReceipt } = require('../utils/verifyClaimReceipt');
 const {
   finalizeJackpotClaimInDb,
+  finalizeBatchJackpotClaimInDb,
   rollbackJackpotReservation,
+  rollbackBatchJackpotReservation,
   releaseStaleJackpotReservation,
   releaseAllStaleJackpotLocks,
   PREDICTION_CLAIM_LOCK_MS,
@@ -798,19 +800,256 @@ router.post('/claim/:predictionId/confirm', auth, async (req, res) => {
   }
 });
 
-/** @deprecated Use POST /jackpots/claim/:predictionId/authorization */
-router.post('/withdraw/authorization', auth, async (req, res) => {
-  res.status(410).json({
-    message:
-      'Bulk jackpot withdraw is disabled. Claim each free-jackpot win from the event Free details page.',
-  });
+/**
+ * Claim-all free jackpot: one signature + one on-chain withdraw for all unclaimed wins.
+ * Conserves relayer gas vs per-prediction claims.
+ */
+router.get('/claim-all/summary', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).lean();
+    const preds = await Prediction.find({
+      user: req.user._id,
+      type: 'free',
+      status: 'won',
+      jackpotClaimed: { $ne: true },
+      jackpotPayout: { $gt: 0 },
+    })
+      .select('jackpotPayout jackpotClaimInProgress match poll')
+      .lean();
+
+    const unclaimed = preds.reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
+    const gamesWon = preds.length;
+    const claimedAgg = await Prediction.aggregate([
+      {
+        $match: {
+          user: req.user._id,
+          type: 'free',
+          status: 'won',
+          jackpotClaimed: true,
+          jackpotPayout: { $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$jackpotPayout' },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.json({
+      jackpotBalance: Math.max(0, user?.jackpotBalance || 0),
+      jackpotBalancePending: user?.jackpotBalancePending || 0,
+      jackpotWithdrawn: user?.jackpotWithdrawn || 0,
+      unclaimedUsdc: Math.round(unclaimed * 1e6) / 1e6,
+      unclaimedGames: gamesWon,
+      claimedUsdc: claimedAgg[0]?.total || 0,
+      claimedGames: claimedAgg[0]?.count || 0,
+      gamesWonTotal: gamesWon + (claimedAgg[0]?.count || 0),
+      canClaimAll: unclaimed > 0 && (user?.jackpotBalance || 0) >= unclaimed - 0.0001,
+      predictionIds: preds.map((p) => String(p._id)),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
-/** @deprecated Use POST /jackpots/claim/:predictionId/confirm */
-router.post('/withdraw', auth, async (req, res) => {
+router.post('/claim-all/authorization', auth, async (req, res) => {
+  let reservedAmount = 0;
+  let lockedIds = [];
+  try {
+    await releaseAllStaleJackpotLocks(req.user._id, {});
+
+    const { walletAddress } = req.body || {};
+    if (!walletAddress) {
+      return res.status(400).json({ message: 'walletAddress is required' });
+    }
+
+    const claimSignerAddress = getClaimSignerAddress();
+    if (!claimSignerAddress) {
+      return res.status(503).json({
+        message: 'Claims are not configured (set CLAIM_AUTH_PRIVATE_KEY on the server)',
+      });
+    }
+
+    const contractAddressRaw =
+      process.env.CONTRACT_ADDRESS || process.env.REACT_APP_CONTRACT_ADDRESS;
+    const { getChainId } = require('../utils/chainConfig');
+    const chainId = getChainId();
+    if (!contractAddressRaw) {
+      return res.status(500).json({ message: 'CONTRACT_ADDRESS not configured on server' });
+    }
+
+    const preds = await Prediction.find({
+      user: req.user._id,
+      type: 'free',
+      status: 'won',
+      jackpotClaimed: { $ne: true },
+      jackpotPayout: { $gt: 0 },
+      $or: [
+        { jackpotClaimInProgress: { $ne: true } },
+        {
+          jackpotClaimInProgress: true,
+          jackpotClaimLockedAt: { $lt: new Date(Date.now() - PREDICTION_CLAIM_LOCK_MS) },
+        },
+        { jackpotClaimInProgress: true, jackpotClaimLockedAt: { $exists: false } },
+      ],
+    }).select('_id jackpotPayout');
+
+    if (!preds.length) {
+      return res.status(400).json({ message: 'No unclaimed free jackpot wins' });
+    }
+
+    const withdrawAmount = preds.reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
+    if (!(withdrawAmount > 0)) {
+      return res.status(400).json({ message: 'No jackpot amount to claim' });
+    }
+    reservedAmount = withdrawAmount;
+    lockedIds = preds.map((p) => p._id);
+
+    const reqAddr = await assertWalletLinkedToUser({
+      userId: req.user._id,
+      walletAddress,
+    });
+
+    const userReserved = await User.findOneAndUpdate(
+      {
+        _id: req.user._id,
+        jackpotBalance: { $gte: withdrawAmount - 0.000001 },
+        jackpotWithdrawInProgress: { $ne: true },
+      },
+      {
+        $inc: { jackpotBalance: -withdrawAmount, jackpotBalancePending: withdrawAmount },
+        $set: { jackpotWithdrawInProgress: true, jackpotWithdrawLockedAt: new Date() },
+      },
+      { new: true }
+    );
+    if (!userReserved) {
+      return res.status(409).json({
+        message: 'Insufficient balance or another jackpot claim is in progress',
+      });
+    }
+
+    const lockRes = await Prediction.updateMany(
+      { _id: { $in: lockedIds }, jackpotClaimed: { $ne: true } },
+      { $set: { jackpotClaimInProgress: true, jackpotClaimLockedAt: new Date() } }
+    );
+    if (!(lockRes.modifiedCount > 0)) {
+      await rollbackBatchJackpotReservation(req.user._id, lockedIds, withdrawAmount);
+      return res.status(409).json({ message: 'Could not lock jackpot claims — try again' });
+    }
+
+    const dbTotal =
+      (userReserved.jackpotBalance || 0) + (userReserved.jackpotBalancePending || 0);
+    const onChain = await readJackpotBalanceOnChain(reqAddr);
+    if (onChain == null || onChain + 0.02 < withdrawAmount) {
+      try {
+        await setJackpotBalanceOnChain(reqAddr, dbTotal);
+      } catch (syncErr) {
+        await rollbackBatchJackpotReservation(req.user._id, lockedIds, withdrawAmount);
+        return res.status(503).json({
+          message: syncErr.message || 'Could not sync on-chain jackpot balance',
+        });
+      }
+    }
+
+    const amountWei = payoutToWei(withdrawAmount);
+    const deadlineSec = Math.floor(Date.now() / 1000) + 30 * 60;
+    const nonce = ethers.hexlify(crypto.randomBytes(32));
+    const contractAddress = ethers.getAddress(contractAddressRaw);
+
+    const { signature } = await signJackpotWithdrawPayload({
+      userAddress: reqAddr,
+      amountWei,
+      nonce,
+      deadlineSec,
+      chainId,
+      contractAddress,
+    });
+
+    res.json({
+      claimSignerAddress,
+      contractAddress,
+      chainId,
+      amountWei: amountWei.toString(),
+      amountUsdc: withdrawAmount,
+      predictionIds: lockedIds.map((id) => String(id)),
+      winCount: lockedIds.length,
+      nonce,
+      deadline: deadlineSec,
+      signature,
+    });
+  } catch (error) {
+    console.error('jackpot claim-all authorization:', error);
+    if (reservedAmount > 0) {
+      try {
+        await rollbackBatchJackpotReservation(req.user._id, lockedIds, reservedAmount);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    const code = error.statusCode && Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    res.status(code).json({ message: error.message || 'Failed to authorize claim-all' });
+  }
+});
+
+router.post('/claim-all/confirm', auth, async (req, res) => {
+  try {
+    const { txHash, walletAddress, predictionIds, amountUsdc } = req.body || {};
+    if (!txHash || !String(txHash).trim()) {
+      return res.status(400).json({ message: 'txHash is required' });
+    }
+    const ids = Array.isArray(predictionIds) ? predictionIds.map(String) : [];
+    const withdrawAmount = Number(amountUsdc) || 0;
+    if (!(withdrawAmount > 0) || !ids.length) {
+      return res.status(400).json({ message: 'predictionIds and amountUsdc required' });
+    }
+
+    let wallet = walletAddress;
+    if (!wallet) {
+      const link = await WalletLink.findOne({ user: req.user._id }).lean();
+      wallet = link?.walletAddress;
+    }
+    if (!wallet) {
+      return res.status(400).json({ message: 'walletAddress is required to verify transaction' });
+    }
+
+    await verifyJackpotWithdrawReceipt({
+      txHash: String(txHash).trim(),
+      walletAddress: wallet,
+      amountUsdc: withdrawAmount,
+    });
+
+    const result = await finalizeBatchJackpotClaimInDb({
+      userId: req.user._id,
+      predictionIds: ids,
+      withdrawAmount,
+      txHash: String(txHash).trim(),
+    });
+
+    res.json({
+      message: 'All available jackpot claimed successfully',
+      ...result,
+    });
+  } catch (error) {
+    console.error('jackpot claim-all confirm:', error);
+    const code = error.statusCode && Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    res.status(code).json({ message: error.message || 'Failed to confirm claim-all' });
+  }
+});
+
+/** @deprecated Prefer POST /jackpots/claim-all/authorization */
+router.post('/withdraw/authorization', (req, res, next) => {
+  req.url = '/claim-all/authorization';
+  req.originalUrl = (req.baseUrl || '') + '/claim-all/authorization';
+  next('route');
+});
+
+/** @deprecated Prefer POST /jackpots/claim-all/confirm */
+router.post('/withdraw', (req, res) => {
   res.status(410).json({
-    message:
-      'Bulk jackpot withdraw is disabled. Claim each free-jackpot win from the event Free details page.',
+    message: 'Use POST /jackpots/claim-all/confirm for batch claims.',
   });
 });
 

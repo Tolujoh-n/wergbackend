@@ -6,6 +6,7 @@ const {
   getNftBonusesConfigRows,
   getGoldenTicketBoostRanges,
   getGoldenTicketBoostRate,
+  getGoldenTicketMarketRate,
 } = require('../services/ticketService');
 
 const router = express.Router();
@@ -19,10 +20,14 @@ router.get('/balances', auth, async (req, res) => {
   try {
     const additionalWallets = parseOptionalWalletQuery(req);
     const balances = await getTicketBalances(req.user._id, { additionalWallets });
-    const goldenRate = await getGoldenTicketBoostRate();
+    const [goldenRate, marketRate] = await Promise.all([
+      getGoldenTicketBoostRate(),
+      getGoldenTicketMarketRate(),
+    ]);
     res.json({
       ...balances,
       goldenTicketBoostRate: goldenRate,
+      goldenTicketMarketRate: marketRate,
       goldenTicketBoostRanges: [],
       walletChecked: additionalWallets[0] || null,
     });
@@ -59,10 +64,14 @@ router.get('/verify-holdings', auth, async (req, res) => {
   try {
     const additionalWallets = parseOptionalWalletQuery(req);
     const balances = await getTicketBalances(req.user._id, { additionalWallets, forceVerify: true });
-    const goldenRate = await getGoldenTicketBoostRate();
+    const [goldenRate, marketRate] = await Promise.all([
+      getGoldenTicketBoostRate(),
+      getGoldenTicketMarketRate(),
+    ]);
     res.json({
       ...balances,
       goldenTicketBoostRate: goldenRate,
+      goldenTicketMarketRate: marketRate,
       goldenTicketBoostRanges: [],
       walletChecked: additionalWallets[0] || null,
     });

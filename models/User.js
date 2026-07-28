@@ -119,6 +119,10 @@ const userSchema = new mongoose.Schema({
   jackpotWithdrawLockedAt: {
     type: Date,
   },
+  /** Last time the free-play gas drip was used (cooldown from gasDripSettings.freeCooldownDays). */
+  lastFreeGasDripAt: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

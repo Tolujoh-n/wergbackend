@@ -2235,6 +2235,81 @@ router.get('/polls/:id/claim-stats', async (req, res) => {
   }
 });
 
+/** Data Room — advanced per-event analytics (participants, claims, market P&L). */
+router.get('/data-room', async (req, res) => {
+  try {
+    const { getDataRoomRows } = require('../services/dataRoomService');
+    const data = await getDataRoomRows({
+      kind: req.query.kind,
+      from: req.query.from,
+      to: req.query.to,
+      status: req.query.status,
+      resolved: req.query.resolved,
+      q: req.query.q,
+      limit: req.query.limit,
+    });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/settings/goldenTicketMarketRate', async (req, res) => {
+  try {
+    const { getGoldenTicketMarketRate } = require('../services/ticketService');
+    const rate = await getGoldenTicketMarketRate();
+    res.json({ rate });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/goldenTicketMarketRate', async (req, res) => {
+  try {
+    const tickets = Math.max(0, parseInt(req.body.tickets, 10) || 0);
+    const perUsdc = Math.max(0.01, Number(req.body.perUsdc) || 10);
+    const rate = { tickets, perUsdc };
+    await Settings.findOneAndUpdate(
+      { key: 'goldenTicketMarketRate' },
+      {
+        key: 'goldenTicketMarketRate',
+        value: rate,
+        description: 'Golden tickets earned per USDC bought on market (rounded)',
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ rate });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/settings/gasDripSettings', async (req, res) => {
+  try {
+    const { getGasDripSettings } = require('../services/gasDripSettings');
+    const settings = await getGasDripSettings();
+    res.json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/gasDripSettings', async (req, res) => {
+  try {
+    const { setGasDripSettings } = require('../services/gasDripSettings');
+    const settings = await setGasDripSettings({
+      freeUsd: req.body.freeUsd,
+      boostUsd: req.body.boostUsd,
+      marketUsd: req.body.marketUsd,
+      freeCooldownDays: req.body.freeCooldownDays,
+      ethUsdFallback: req.body.ethUsdFallback,
+    });
+    res.json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/matches/:id/boost-pool', async (req, res) => {
   const m = await Match.findById(req.params.id).select('boostPool teamA teamB');
   if (!m) return res.status(404).json({ message: 'Not found' });

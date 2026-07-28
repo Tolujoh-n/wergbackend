@@ -310,4 +310,22 @@ router.get('/polls/:id/claim-stats', async (req, res) => {
   }
 });
 
+router.get('/data-room', async (req, res) => {
+  try {
+    const { getDataRoomRows } = require('../services/dataRoomService');
+    const data = await getDataRoomRows({
+      kind: req.query.kind,
+      from: req.query.from,
+      to: req.query.to,
+      status: req.query.status,
+      resolved: req.query.resolved,
+      q: req.query.q,
+      limit: req.query.limit,
+    });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 module.exports = router;

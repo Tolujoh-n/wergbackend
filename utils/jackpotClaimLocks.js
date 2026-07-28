@@ -249,12 +249,102 @@ async function releaseAllStaleJackpotLocks(userId, { predictionId } = {}) {
   return releaseStaleJackpotPredictionLocks(userId, { predictionId });
 }
 
+/**
+ * Finalize a batch claim: one on-chain withdraw covers many free wins.
+ */
+async function finalizeBatchJackpotClaimInDb({ userId, predictionIds, withdrawAmount, txHash }) {
+  const ids = (predictionIds || []).map((id) => String(id));
+  if (txHash && String(txHash).trim()) {
+    const { reserved } = await reserveTx('jackpot_withdraw_batch', txHash, {
+      user: userId,
+      predictionIds: ids,
+      amount: withdrawAmount,
+    });
+    if (!reserved) {
+      const fresh = await User.findById(userId);
+      return {
+        alreadyProcessed: true,
+        remainingBalance: fresh?.jackpotBalance ?? 0,
+        totalWithdrawn: fresh?.jackpotWithdrawn ?? 0,
+        claimedCount: 0,
+      };
+    }
+  }
+
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: userId, jackpotBalancePending: { $gte: withdrawAmount - 0.000001 } },
+    {
+      $inc: { jackpotBalancePending: -withdrawAmount, jackpotWithdrawn: withdrawAmount },
+      $set: { jackpotWithdrawInProgress: false },
+    },
+    { new: true }
+  );
+  if (!updatedUser) {
+    const err = new Error(
+      'No pending jackpot reservation for this amount. Contact support if USDC was received.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const result = await Prediction.updateMany(
+    {
+      _id: { $in: ids },
+      user: userId,
+      type: 'free',
+      jackpotClaimed: { $ne: true },
+      jackpotPayout: { $gt: 0 },
+    },
+    {
+      $set: {
+        jackpotClaimed: true,
+        jackpotClaimInProgress: false,
+        ...(txHash ? { jackpotClaimTxHash: String(txHash).trim() } : {}),
+      },
+    }
+  );
+
+  if (txHash && String(txHash).trim()) {
+    await finalizeTx('jackpot_withdraw_batch', txHash, { 'meta.completed': true });
+  }
+
+  return {
+    alreadyProcessed: false,
+    withdrawn: withdrawAmount,
+    remainingBalance: updatedUser.jackpotBalance,
+    totalWithdrawn: updatedUser.jackpotWithdrawn,
+    claimedCount: result.modifiedCount || 0,
+  };
+}
+
+async function rollbackBatchJackpotReservation(userId, predictionIds, amount) {
+  if (amount > 0) {
+    await User.updateOne(
+      { _id: userId },
+      {
+        $inc: { jackpotBalance: amount, jackpotBalancePending: -amount },
+        $set: { jackpotWithdrawInProgress: false },
+      }
+    );
+  } else {
+    await User.updateOne({ _id: userId }, { $set: { jackpotWithdrawInProgress: false } });
+  }
+  if (predictionIds?.length) {
+    await Prediction.updateMany(
+      { _id: { $in: predictionIds } },
+      { $set: { jackpotClaimInProgress: false, jackpotClaimLockedAt: null } }
+    );
+  }
+}
+
 module.exports = {
   JACKPOT_CLAIM_LOCK_MS,
   PREDICTION_CLAIM_LOCK_MS,
   finalizeJackpotClaimInDb,
+  finalizeBatchJackpotClaimInDb,
   tryRecoverStaleJackpotClaims,
   rollbackJackpotReservation,
+  rollbackBatchJackpotReservation,
   releaseStaleJackpotReservation,
   releaseStaleJackpotPredictionLocks,
   releaseAllStaleJackpotLocks,

@@ -43,17 +43,31 @@ async function getGoldenTicketBoostRanges() {
 }
 
 const DEFAULT_GOLDEN_TICKET_BOOST_RATE = { tickets: 1, perUsdc: 10 };
+/** Default: 1 golden ticket per $10 USDC bought on market (same shape as boost). */
+const DEFAULT_GOLDEN_TICKET_MARKET_RATE = { tickets: 1, perUsdc: 10 };
+
+function normalizeTicketRate(v, fallback) {
+  if (v && typeof v === 'object' && Number(v.perUsdc) > 0) {
+    return {
+      tickets: Math.max(0, parseInt(v.tickets, 10) || 0),
+      perUsdc: Math.max(0.01, Number(v.perUsdc) || fallback.perUsdc),
+    };
+  }
+  return { ...fallback };
+}
 
 async function getGoldenTicketBoostRate() {
   const s = await Settings.findOne({ key: 'goldenTicketBoostRate' }).lean();
-  const v = s?.value;
-  if (v && typeof v === 'object' && Number(v.perUsdc) > 0) {
-    return {
-      tickets: Math.max(0, parseInt(v.tickets, 10) || 1),
-      perUsdc: Math.max(0.01, Number(v.perUsdc) || DEFAULT_GOLDEN_TICKET_BOOST_RATE.perUsdc),
-    };
-  }
-  return { ...DEFAULT_GOLDEN_TICKET_BOOST_RATE };
+  return normalizeTicketRate(s?.value, DEFAULT_GOLDEN_TICKET_BOOST_RATE);
+}
+
+async function getGoldenTicketMarketRate() {
+  const s = await Settings.findOne({ key: 'goldenTicketMarketRate' }).lean();
+  return normalizeTicketRate(s?.value, DEFAULT_GOLDEN_TICKET_MARKET_RATE);
+}
+
+function goldenTicketsForMarketBuy(rate, buyUsdc) {
+  return goldenTicketsForBoostAmount(rate, buyUsdc);
 }
 
 function goldenTicketsForBoostAmount(rate, stakeUsdc) {
@@ -442,9 +456,13 @@ module.exports = {
   getNftBonusesConfigRows,
   getGoldenTicketBoostRanges,
   getGoldenTicketBoostRate,
+  getGoldenTicketMarketRate,
+  DEFAULT_GOLDEN_TICKET_BOOST_RATE,
+  DEFAULT_GOLDEN_TICKET_MARKET_RATE,
   getTicketBalances,
   deductTickets,
   goldenTicketsForBoostAmount,
+  goldenTicketsForMarketBuy,
   awardGoldenTickets,
   resetDailyTicketsIfNeeded,
   nftBonusTicketsForUser,

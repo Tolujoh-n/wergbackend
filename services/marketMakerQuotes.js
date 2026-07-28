@@ -18,6 +18,8 @@ const {
   isOptionSidePaused,
   midFromBookSide,
   depthWeightedMidFromBookSide,
+  positionVwapForOptionSide,
+  blendBookAndPositionMid,
 } = require('./orderbookService');
 const { isCrossingOrder } = require('./orderbookTradingPanel');
 const { mmLevelSizesForSide, mmLevelCountForSide, sideVolumeUsdc } = require('../utils/mmQuoteVolume');
@@ -141,15 +143,31 @@ async function resolveQuoteMid({ doc, optionKey, side, chainMarketId, mmWalletLo
   const thisMid = depthWeightedMidFromBookSide(extBids, extAsks, 3);
   const otherMid = depthWeightedMidFromBookSide(extOtherBids, extOtherAsks, 3);
 
-  let fair = null;
+  let bookFair = null;
   if (thisMid != null && otherMid != null) {
-    // Complement blend (YES ≈ 1 − NO) reduces one-sided spoof/thin-book skew.
-    fair = 0.5 * thisMid + 0.5 * (1 - otherMid);
+    bookFair = 0.5 * thisMid + 0.5 * (1 - otherMid);
   } else if (thisMid != null) {
-    fair = thisMid;
+    bookFair = thisMid;
   } else if (otherMid != null) {
-    fair = 1 - otherMid;
+    bookFair = 1 - otherMid;
   }
+
+  let positionFair = null;
+  try {
+    const thisPos = await positionVwapForOptionSide(chainMarketId, optionKey, side);
+    const otherSide = side === 'YES' ? 'NO' : 'YES';
+    const otherPos = await positionVwapForOptionSide(chainMarketId, optionKey, otherSide);
+    let posBlend = null;
+    if (thisPos != null && otherPos != null) {
+      posBlend = 0.5 * thisPos + 0.5 * (1 - otherPos);
+    } else if (thisPos != null) posBlend = thisPos;
+    else if (otherPos != null) posBlend = 1 - otherPos;
+    positionFair = blendBookAndPositionMid(bookFair, posBlend);
+  } catch {
+    positionFair = bookFair;
+  }
+
+  let fair = positionFair != null ? positionFair : bookFair;
 
   // Thin or empty external book: do not chase tape / own quotes — stay near admin target.
   const MIN_EXT_DEPTH = 5; // shares
