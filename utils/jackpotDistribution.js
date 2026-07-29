@@ -61,6 +61,9 @@ async function getFreeJackpotStats({ matchId, pollId, userId }) {
   const ticketsByOutcome = {};
   let totalTickets = 0;
   let userTickets = 0;
+  let winnersCount = 0;
+  let losersCount = 0;
+  let winningTickets = 0;
   for (const p of predictions) {
     const key = normalizeBoostOutcomeKey(p.outcome, item, kind);
     const t = Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
@@ -68,6 +71,14 @@ async function getFreeJackpotStats({ matchId, pollId, userId }) {
     totalTickets += t;
     if (userId && String(p.user) === String(userId)) {
       userTickets += t;
+    }
+    if (item.isResolved) {
+      if (p.status === 'won') {
+        winnersCount += 1;
+        winningTickets += t;
+      } else if (p.status === 'lost') {
+        losersCount += 1;
+      }
     }
   }
 
@@ -84,13 +95,8 @@ async function getFreeJackpotStats({ matchId, pollId, userId }) {
     if (tracked > 0) {
       userJackpotWinAmount = tracked;
     } else if (mine.length > 0 && pool > 0) {
-      let winTotalTickets = 0;
-      const winningPreds = predictions.filter((p) => p.status === 'won');
-      for (const p of winningPreds) {
-        winTotalTickets += Math.max(1, parseInt(p.ticketsStaked, 10) || 1);
-      }
-      if (winTotalTickets > 0) {
-        userJackpotWinAmount = (pool / winTotalTickets) * userTickets;
+      if (winningTickets > 0) {
+        userJackpotWinAmount = (pool / winningTickets) * userTickets;
       } else {
         userJackpotWinAmount = 0;
       }
@@ -105,6 +111,10 @@ async function getFreeJackpotStats({ matchId, pollId, userId }) {
     totalTickets,
     userTickets,
     userJackpotWinAmount,
+    winnersCount: item.isResolved ? winnersCount : null,
+    losersCount: item.isResolved ? losersCount : null,
+    winningTickets: item.isResolved ? winningTickets : null,
+    participantsCount: predictions.length,
   };
 }
 
