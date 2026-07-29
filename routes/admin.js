@@ -1965,8 +1965,9 @@ router.get('/settings/:key', async (req, res) => {
       const defaults = {
         dailyFreePlayLimit: 1,
         pointsPerWin: 10,
+        homeLandingEnabled: false,
       };
-      return res.json({ key: req.params.key, value: defaults[req.params.key] || null });
+      return res.json({ key: req.params.key, value: defaults[req.params.key] ?? null });
     }
     res.json(setting);
   } catch (error) {
@@ -1982,6 +1983,7 @@ router.post('/settings/:key', async (req, res) => {
     const descriptions = {
       dailyFreePlayLimit: 'Number of free predictions per day',
       pointsPerWin: 'Points awarded per winning prediction',
+      homeLandingEnabled: 'When true, / shows the Home hub; when false, / redirects to the first navbar cup',
     };
     
     if (setting) {
