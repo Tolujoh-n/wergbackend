@@ -14,9 +14,10 @@ const router = express.Router();
 // Leaderboard helper: top users by total engagement streak
 router.get('/', async (req, res) => {
   try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const today = utcDayKey();
     const users = await User.find()
-      .select('username email walletAddress streak engagementStreaks correctPredictions totalPredictions points')
+      .select('username walletAddress streak engagementStreaks correctPredictions totalPredictions points')
       .lean();
 
     const rows = users.map((u) => {
@@ -29,7 +30,12 @@ router.get('/', async (req, res) => {
       const longestStreak =
         (login.best || 0) + (free.best || 0) + (boost.best || 0);
       return {
-        ...u,
+        _id: u._id,
+        username: u.username,
+        walletAddress: u.walletAddress,
+        correctPredictions: u.correctPredictions || 0,
+        totalPredictions: u.totalPredictions || 0,
+        points: u.points || 0,
         streak: currentStreak,
         currentStreak,
         longestStreak,
@@ -42,7 +48,7 @@ router.get('/', async (req, res) => {
         (b.longestStreak || 0) - (a.longestStreak || 0)
     );
 
-    res.json(rows.filter((r) => (r.currentStreak || 0) > 0).slice(0, 50));
+    res.json(rows.filter((r) => (r.currentStreak || 0) > 0).slice(0, limit));
   } catch (error) {
     console.error('Streaks error:', error);
     res.status(500).json({ message: error.message });

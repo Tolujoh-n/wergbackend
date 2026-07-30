@@ -80,14 +80,14 @@ router.get('/', async (req, res) => {
       return (b.correctPredictions || 0) - (a.correctPredictions || 0);
     });
     
-    // Pagination: 20 rows per page
-    const page = parseInt(req.query.page) || 1;
-    const limit = 20;
+    // Pagination
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const startIndex = (page - 1) * limit;
     const endIndex = page * limit;
     
     const result = usersWithPredictions.slice(startIndex, endIndex);
-    const totalPages = Math.ceil(usersWithPredictions.length / limit);
+    const totalPages = Math.ceil(usersWithPredictions.length / limit) || 1;
     
     console.log(`[Leaderboard] Returning ${result.length} users (page ${page}/${totalPages})`);
     res.json({
@@ -97,7 +97,8 @@ router.get('/', async (req, res) => {
         totalPages,
         totalUsers: usersWithPredictions.length,
         hasNext: endIndex < usersWithPredictions.length,
-        hasPrev: page > 1
+        hasPrev: page > 1,
+        limit,
       }
     });
   } catch (error) {
