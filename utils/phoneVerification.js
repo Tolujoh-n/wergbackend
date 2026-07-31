@@ -9,7 +9,11 @@ function generateNumericCode() {
 }
 
 function getPhoneVerifySecret() {
-  return process.env.PHONE_VERIFY_SECRET || process.env.JWT_SECRET || 'your-secret-key';
+  if (process.env.PHONE_VERIFY_SECRET && String(process.env.PHONE_VERIFY_SECRET).trim()) {
+    return String(process.env.PHONE_VERIFY_SECRET).trim();
+  }
+  const { getJwtSecret } = require('./jwtSecret');
+  return getJwtSecret();
 }
 
 function hashPhoneCode(code) {

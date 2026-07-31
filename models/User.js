@@ -119,8 +119,20 @@ const userSchema = new mongoose.Schema({
   jackpotWithdrawLockedAt: {
     type: Date,
   },
-  /** Last time the free-play gas drip was used (cooldown from gasDripSettings.freeCooldownDays). */
+  /** Last free-play gas drip (cooldown: freeCooldownDays). */
   lastFreeGasDripAt: {
+    type: Date,
+  },
+  /** Last boost gas drip (cooldown: boostCooldownHours). */
+  lastBoostGasDripAt: {
+    type: Date,
+  },
+  /** Last market gas drip (cooldown: marketCooldownHours). */
+  lastMarketGasDripAt: {
+    type: Date,
+  },
+  /** In-flight drip lock — prevents parallel drain requests. */
+  gasDripLockUntil: {
     type: Date,
   },
   createdAt: {

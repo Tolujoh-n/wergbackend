@@ -17,6 +17,14 @@ const walletLinkSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  /** Last successful gas drip to this wallet (any play type). */
+  lastGasDripAt: {
+    type: Date,
+  },
+  /** In-flight drip lock for this wallet. */
+  gasDripLockUntil: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

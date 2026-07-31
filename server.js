@@ -6,6 +6,13 @@ const cron = require('node-cron');
 
 dotenv.config();
 
+try {
+  require('./utils/jwtSecret').assertJwtSecretConfigured();
+} catch (e) {
+  console.error(`[WeRgame] ${e.message}`);
+  process.exit(1);
+}
+
 const { ethers } = require('ethers');
 const { getClaimSignerAddress } = require('./utils/claimAuth');
 const { router: ethPriceRouter, updateEthPrice } = require('./routes/ethPrice');

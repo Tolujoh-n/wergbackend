@@ -35,8 +35,25 @@ const signupRateLimit = createIpRateLimiter({
     "You've reached the registration limit for this device/network. Please try again in 1 hour.",
 });
 
+const walletSignupRateLimit = createIpRateLimiter({
+  action: 'auth:wallet-signup',
+  limit: 5,
+  windowMs: 60 * 60 * 1000,
+  message:
+    "You've reached the wallet registration limit for this device/network. Please try again later.",
+});
+
+const walletLoginRateLimit = createIpRateLimiter({
+  action: 'auth:wallet-login',
+  limit: 30,
+  windowMs: 60 * 1000,
+  message: 'Too many wallet login attempts. Please try again in a minute.',
+});
+
 module.exports = {
   loginRateLimit,
   signupRateLimit,
+  walletSignupRateLimit,
+  walletLoginRateLimit,
   createIpRateLimiter,
 };

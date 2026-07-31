@@ -2,9 +2,15 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WalletLink = require('../models/WalletLink');
-const { auth } = require('../middleware/auth');
-const { loginRateLimit, signupRateLimit } = require('../middleware/ipRateLimit');
+const { auth, optionalAuth } = require('../middleware/auth');
+const { loginRateLimit, signupRateLimit, walletSignupRateLimit, walletLoginRateLimit } = require('../middleware/ipRateLimit');
 const { requireTurnstile } = require('../middleware/turnstile');
+const { getJwtSecret } = require('../utils/jwtSecret');
+const {
+  createWalletChallenge,
+  verifyAndConsumeWalletProof,
+} = require('../services/walletOwnership');
+const { getMaxLinkedWallets } = require('../services/walletLinkSettings');
 const {
   sendPasswordResetCode,
   verifyPasswordResetCode,
@@ -52,7 +58,7 @@ async function touchLoginStreak(userId) {
 }
 
 const generateToken = (userId) => {
-  return jwt.sign({ userId }, process.env.JWT_SECRET || 'your-secret-key', {
+  return jwt.sign({ userId }, getJwtSecret(), {
     expiresIn: '7d',
   });
 };
@@ -166,9 +172,24 @@ async function linkWalletToUser({ userId, address }) {
     err.ownerUserId = existing.user;
     throw err;
   }
-  if (!existing) {
-    await WalletLink.create({ walletAddress, user: userId });
+  if (existing && String(existing.user) === String(userId)) {
+    // Already linked to this user — treat as success (idempotent).
+    return walletAddress;
   }
+
+  const maxWallets = await getMaxLinkedWallets();
+  const currentCount = await WalletLink.countDocuments({ user: userId });
+  if (currentCount >= maxWallets) {
+    const wallets = await getUserWallets(userId);
+    const err = new Error('WALLET_LIMIT_REACHED');
+    err.statusCode = 409;
+    err.code = 'WALLET_LIMIT_REACHED';
+    err.max = maxWallets;
+    err.wallets = wallets;
+    throw err;
+  }
+
+  await WalletLink.create({ walletAddress, user: userId });
 
   // Best-effort: if legacy field is empty, set it to first linked wallet for compatibility.
   const u = await User.findById(userId).select('walletAddress').lean();
@@ -359,23 +380,49 @@ router.post('/password-reset/confirm', async (req, res) => {
   }
 });
 
-// Login/Signup with wallet
-router.post('/wallet-login', async (req, res) => {
+// One-time message for the wallet to sign (proves ownership).
+router.post('/wallet-challenge', optionalAuth, async (req, res) => {
   try {
-    const { address } = req.body;
+    const address = req.body?.address || req.body?.walletAddress;
+    const purpose = req.body?.purpose === 'link' ? 'link' : 'auth';
+    if (purpose === 'link' && !req.user) {
+      return res.status(401).json({ message: 'Login required to link a wallet' });
+    }
+    const challenge = await createWalletChallenge({
+      address,
+      purpose,
+      userId: purpose === 'link' ? req.user._id : null,
+    });
+    return res.json(challenge);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Failed to create wallet challenge',
+      code: error.code,
+    });
+  }
+});
+
+// Login with wallet (requires signed ownership proof)
+router.post('/wallet-login', walletLoginRateLimit, async (req, res) => {
+  try {
+    const { address, signature, nonce } = req.body || {};
+    await verifyAndConsumeWalletProof({
+      address,
+      purpose: 'auth',
+      signature,
+      nonce,
+    });
     const walletAddress = normalizeWalletAddress(address);
     if (!walletAddress) {
       return res.status(400).json({ message: 'address is required' });
     }
 
-    // First: resolve via wallet link table (supports multiple wallets per user)
     let link = await WalletLink.findOne({ walletAddress }).lean();
     let user = null;
     if (link?.user) {
       user = await User.findById(link.user);
     }
 
-    // Backward compatibility: if still not found, try legacy User.walletAddress and create link.
     if (!user) {
       user = await User.findOne({ walletAddress });
       if (user) {
@@ -391,20 +438,28 @@ router.post('/wallet-login', async (req, res) => {
     await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({
+      message: error.message || 'Wallet login failed',
+      code: error.code,
+    });
   }
 });
 
-// Signup with wallet
-router.post('/wallet-signup', async (req, res) => {
+// Signup with wallet (requires signed ownership proof)
+router.post('/wallet-signup', walletSignupRateLimit, async (req, res) => {
   try {
-    const { address, referralCode } = req.body;
+    const { address, referralCode, signature, nonce } = req.body || {};
+    await verifyAndConsumeWalletProof({
+      address,
+      purpose: 'auth',
+      signature,
+      nonce,
+    });
     const walletAddress = normalizeWalletAddress(address);
     if (!walletAddress) {
       return res.status(400).json({ message: 'address is required' });
     }
 
-    // If already linked, return the associated user (don't create duplicates)
     const existingLink = await WalletLink.findOne({ walletAddress }).lean();
     if (existingLink?.user) {
       const existingUser = await User.findById(existingLink.user);
@@ -426,7 +481,10 @@ router.post('/wallet-signup', async (req, res) => {
     await touchLoginStreak(user._id);
     res.json({ token, user: await toUserResponse(user, { fast: true }) });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({
+      message: error.message || 'Wallet signup failed',
+      code: error.code,
+    });
   }
 });
 
@@ -438,7 +496,15 @@ router.post('/wallets/check', auth, async (req, res) => {
 
     const existing = await WalletLink.findOne({ walletAddress }).lean();
     if (!existing) {
-      return res.json({ ok: true, status: 'available' });
+      const max = await getMaxLinkedWallets();
+      const count = await WalletLink.countDocuments({ user: req.user._id });
+      return res.json({
+        ok: true,
+        status: 'available',
+        max,
+        linkedCount: count,
+        atLimit: count >= max,
+      });
     }
     if (String(existing.user) === String(req.user._id)) {
       return res.json({ ok: true, status: 'linked_to_me' });
@@ -453,10 +519,59 @@ router.post('/wallets/check', auth, async (req, res) => {
   }
 });
 
-// Link a wallet to the authenticated account (email user can have multiple wallets)
+// Link a wallet to the authenticated account (requires signed ownership proof)
 router.post('/wallets/link', auth, async (req, res) => {
   try {
     const address = req.body?.address || req.body?.walletAddress;
+    const walletAddressNorm = normalizeWalletAddress(address);
+    if (!walletAddressNorm) {
+      return res.status(400).json({ message: 'address is required' });
+    }
+
+    // Idempotent: already linked — no signature needed
+    const existing = await WalletLink.findOne({ walletAddress: walletAddressNorm }).lean();
+    if (existing && String(existing.user) === String(req.user._id)) {
+      const user = await User.findById(req.user._id);
+      return res.json({
+        ok: true,
+        walletAddress: walletAddressNorm,
+        alreadyLinked: true,
+        user: await toUserResponse(user),
+      });
+    }
+
+    // Cap check before asking the user to sign
+    if (!existing) {
+      const maxWallets = await getMaxLinkedWallets();
+      const currentCount = await WalletLink.countDocuments({ user: req.user._id });
+      if (currentCount >= maxWallets) {
+        const wallets = await getUserWallets(req.user._id);
+        return res.status(409).json({
+          ok: false,
+          status: 'limit_reached',
+          code: 'WALLET_LIMIT_REACHED',
+          message: `You can link at most ${maxWallets} wallets to this account.`,
+          max: maxWallets,
+          wallets,
+        });
+      }
+    } else if (String(existing.user) !== String(req.user._id)) {
+      return res.status(409).json({
+        ok: false,
+        status: 'in_use',
+        code: 'WALLET_IN_USE',
+        message: 'The wallet address is already associated with another account.',
+      });
+    }
+
+    const { signature, nonce } = req.body || {};
+    await verifyAndConsumeWalletProof({
+      address,
+      purpose: 'link',
+      signature,
+      nonce,
+      userId: req.user._id,
+    });
     const walletAddress = await linkWalletToUser({ userId: req.user._id, address });
     const { clearAdminCacheForWallet } = require('../services/contractAdminAccess');
     const { scheduleNftHoldingsRefresh } = require('../services/ticketService');
@@ -469,10 +584,24 @@ router.post('/wallets/link', auth, async (req, res) => {
       return res.status(409).json({
         ok: false,
         status: 'in_use',
+        code: 'WALLET_IN_USE',
         message: 'The wallet address is already associated with another account.',
       });
     }
-    return res.status(error?.statusCode || 500).json({ message: error.message || 'Failed to link wallet' });
+    if (error?.code === 'WALLET_LIMIT_REACHED' || error?.message === 'WALLET_LIMIT_REACHED') {
+      return res.status(409).json({
+        ok: false,
+        status: 'limit_reached',
+        code: 'WALLET_LIMIT_REACHED',
+        message: `You can link at most ${error.max} wallets to this account.`,
+        max: error.max,
+        wallets: error.wallets || [],
+      });
+    }
+    return res.status(error?.statusCode || 500).json({
+      message: error.message || 'Failed to link wallet',
+      code: error.code,
+    });
   }
 });
 

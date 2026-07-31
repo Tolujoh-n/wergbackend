@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { BAN_MESSAGE } = require('../services/userBanService');
+const { getJwtSecret } = require('../utils/jwtSecret');
 
 const auth = async (req, res, next) => {
   try {
@@ -10,7 +11,7 @@ const auth = async (req, res, next) => {
       return res.status(401).json({ message: 'No token, authorization denied' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, getJwtSecret());
     const user = await User.findById(decoded.userId).select('-password');
 
     if (!user) {
@@ -24,6 +25,9 @@ const auth = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
+    if (error.code === 'JWT_SECRET_MISSING' || error.code === 'JWT_SECRET_WEAK') {
+      return res.status(503).json({ message: error.message, code: error.code });
+    }
     res.status(401).json({ message: 'Token is not valid' });
   }
 };
@@ -49,7 +53,7 @@ const optionalAuth = async (req, res, next) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
     if (!token) return next();
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, getJwtSecret());
     const user = await User.findById(decoded.userId).select('-password');
     if (user) req.user = user;
   } catch (_) {

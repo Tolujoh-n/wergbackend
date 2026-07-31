@@ -2296,14 +2296,42 @@ router.get('/settings/gasDripSettings', async (req, res) => {
   }
 });
 
+router.get('/settings/maxLinkedWallets', async (req, res) => {
+  try {
+    const { getMaxLinkedWallets } = require('../services/walletLinkSettings');
+    const max = await getMaxLinkedWallets();
+    res.json({ max });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/maxLinkedWallets', async (req, res) => {
+  try {
+    const { setMaxLinkedWallets } = require('../services/walletLinkSettings');
+    const max = await setMaxLinkedWallets(req.body?.max ?? req.body?.value);
+    res.json({ max });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/settings/gasDripSettings', async (req, res) => {
   try {
     const { setGasDripSettings } = require('../services/gasDripSettings');
     const settings = await setGasDripSettings({
+      enabled: req.body.enabled,
       freeUsd: req.body.freeUsd,
       boostUsd: req.body.boostUsd,
       marketUsd: req.body.marketUsd,
       freeCooldownDays: req.body.freeCooldownDays,
+      boostCooldownHours: req.body.boostCooldownHours,
+      marketCooldownHours: req.body.marketCooldownHours,
+      walletCooldownHours: req.body.walletCooldownHours,
+      maxDripsPerUserPerDay: req.body.maxDripsPerUserPerDay,
+      maxDripsPerWalletPerDay: req.body.maxDripsPerWalletPerDay,
+      maxUsdPerUserPerDay: req.body.maxUsdPerUserPerDay,
+      primaryWalletOnly: req.body.primaryWalletOnly,
       ethUsdFallback: req.body.ethUsdFallback,
     });
     res.json({ settings });
