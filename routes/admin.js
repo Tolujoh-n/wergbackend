@@ -1956,6 +1956,93 @@ router.post('/settings/referralRewards', async (req, res) => {
   }
 });
 
+router.get('/settings/goldenTicketMarketRate', async (req, res) => {
+  try {
+    const { getGoldenTicketMarketRate } = require('../services/ticketService');
+    const rate = await getGoldenTicketMarketRate();
+    res.json({ rate });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/goldenTicketMarketRate', async (req, res) => {
+  try {
+    const tickets = Math.max(0, parseInt(req.body.tickets, 10) || 0);
+    const perUsdc = Math.max(0.01, Number(req.body.perUsdc) || 10);
+    const rate = { tickets, perUsdc };
+    await Settings.findOneAndUpdate(
+      { key: 'goldenTicketMarketRate' },
+      {
+        $set: {
+          value: rate,
+          description: 'Golden tickets earned per USDC bought on market (rounded)',
+          updatedAt: new Date(),
+        },
+        $setOnInsert: { key: 'goldenTicketMarketRate' },
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ rate });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/settings/gasDripSettings', async (req, res) => {
+  try {
+    const { getGasDripSettings } = require('../services/gasDripSettings');
+    const settings = await getGasDripSettings();
+    res.json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/gasDripSettings', async (req, res) => {
+  try {
+    const { setGasDripSettings } = require('../services/gasDripSettings');
+    const settings = await setGasDripSettings({
+      enabled: req.body.enabled,
+      freeUsd: req.body.freeUsd,
+      boostUsd: req.body.boostUsd,
+      marketUsd: req.body.marketUsd,
+      freeCooldownDays: req.body.freeCooldownDays,
+      boostCooldownHours: req.body.boostCooldownHours,
+      marketCooldownHours: req.body.marketCooldownHours,
+      walletCooldownHours: req.body.walletCooldownHours,
+      maxDripsPerUserPerDay: req.body.maxDripsPerUserPerDay,
+      maxDripsPerWalletPerDay: req.body.maxDripsPerWalletPerDay,
+      maxUsdPerUserPerDay: req.body.maxUsdPerUserPerDay,
+      primaryWalletOnly: req.body.primaryWalletOnly,
+      ethUsdFallback: req.body.ethUsdFallback,
+    });
+    res.json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/settings/maxLinkedWallets', async (req, res) => {
+  try {
+    const { getMaxLinkedWallets } = require('../services/walletLinkSettings');
+    const max = await getMaxLinkedWallets();
+    res.json({ max });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/maxLinkedWallets', async (req, res) => {
+  try {
+    const { setMaxLinkedWallets } = require('../services/walletLinkSettings');
+    const max = await setMaxLinkedWallets(req.body?.max ?? req.body?.value);
+    res.json({ max });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Settings Management (generic key — register AFTER specific /settings/* routes)
 router.get('/settings/:key', async (req, res) => {
   try {
@@ -2251,90 +2338,6 @@ router.get('/data-room', async (req, res) => {
       limit: req.query.limit,
     });
     res.json(data);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.get('/settings/goldenTicketMarketRate', async (req, res) => {
-  try {
-    const { getGoldenTicketMarketRate } = require('../services/ticketService');
-    const rate = await getGoldenTicketMarketRate();
-    res.json({ rate });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.post('/settings/goldenTicketMarketRate', async (req, res) => {
-  try {
-    const tickets = Math.max(0, parseInt(req.body.tickets, 10) || 0);
-    const perUsdc = Math.max(0.01, Number(req.body.perUsdc) || 10);
-    const rate = { tickets, perUsdc };
-    await Settings.findOneAndUpdate(
-      { key: 'goldenTicketMarketRate' },
-      {
-        key: 'goldenTicketMarketRate',
-        value: rate,
-        description: 'Golden tickets earned per USDC bought on market (rounded)',
-      },
-      { upsert: true, new: true }
-    );
-    res.json({ rate });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.get('/settings/gasDripSettings', async (req, res) => {
-  try {
-    const { getGasDripSettings } = require('../services/gasDripSettings');
-    const settings = await getGasDripSettings();
-    res.json({ settings });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.get('/settings/maxLinkedWallets', async (req, res) => {
-  try {
-    const { getMaxLinkedWallets } = require('../services/walletLinkSettings');
-    const max = await getMaxLinkedWallets();
-    res.json({ max });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.post('/settings/maxLinkedWallets', async (req, res) => {
-  try {
-    const { setMaxLinkedWallets } = require('../services/walletLinkSettings');
-    const max = await setMaxLinkedWallets(req.body?.max ?? req.body?.value);
-    res.json({ max });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.post('/settings/gasDripSettings', async (req, res) => {
-  try {
-    const { setGasDripSettings } = require('../services/gasDripSettings');
-    const settings = await setGasDripSettings({
-      enabled: req.body.enabled,
-      freeUsd: req.body.freeUsd,
-      boostUsd: req.body.boostUsd,
-      marketUsd: req.body.marketUsd,
-      freeCooldownDays: req.body.freeCooldownDays,
-      boostCooldownHours: req.body.boostCooldownHours,
-      marketCooldownHours: req.body.marketCooldownHours,
-      walletCooldownHours: req.body.walletCooldownHours,
-      maxDripsPerUserPerDay: req.body.maxDripsPerUserPerDay,
-      maxDripsPerWalletPerDay: req.body.maxDripsPerWalletPerDay,
-      maxUsdPerUserPerDay: req.body.maxUsdPerUserPerDay,
-      primaryWalletOnly: req.body.primaryWalletOnly,
-      ethUsdFallback: req.body.ethUsdFallback,
-    });
-    res.json({ settings });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

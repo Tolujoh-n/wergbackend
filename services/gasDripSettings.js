@@ -81,10 +81,13 @@ async function setGasDripSettings(partial) {
   await Settings.findOneAndUpdate(
     { key: 'gasDripSettings' },
     {
-      key: 'gasDripSettings',
-      value: next,
-      description:
-        'Relayer gas drip: USD amounts, cooldowns (all play types), daily caps, kill switch',
+      $set: {
+        value: next,
+        description:
+          'Relayer gas drip: USD amounts, cooldowns (all play types), daily caps, kill switch',
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { key: 'gasDripSettings' },
     },
     { upsert: true, new: true }
   );

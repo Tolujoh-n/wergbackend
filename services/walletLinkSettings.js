@@ -18,9 +18,12 @@ async function setMaxLinkedWallets(raw) {
   await Settings.findOneAndUpdate(
     { key: 'maxLinkedWallets' },
     {
-      key: 'maxLinkedWallets',
-      value: n,
-      description: 'Maximum wallet addresses a user can link to one account',
+      $set: {
+        value: n,
+        description: 'Maximum wallet addresses a user can link to one account',
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { key: 'maxLinkedWallets' },
     },
     { upsert: true, new: true }
   );
