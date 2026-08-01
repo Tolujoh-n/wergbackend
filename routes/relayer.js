@@ -15,6 +15,7 @@ const {
   utcDayStart,
   HARD_MAX_USD_PER_DRIP,
 } = require('../services/gasDripSettings');
+const { noteDripDenial, noteDripSuccess } = require('../services/abuseDetection');
 
 const router = express.Router();
 
@@ -26,6 +27,25 @@ const gasDripRateLimit = createIpRateLimiter({
 });
 
 const LOCK_MS = 120 * 1000;
+
+async function denyDrip(res, req, status, body, { walletAddress } = {}) {
+  if (status === 429 || body?.code === 'PRIMARY_WALLET_ONLY') {
+    const ban = await noteDripDenial({
+      userId: req.user?._id,
+      walletAddress: walletAddress || req.body?.walletAddress,
+      ip: getClientIp(req),
+      code: body?.code || String(status),
+      meta: { playType: req.body?.playType },
+    });
+    if (ban?.banned) {
+      return res.status(403).json({
+        message: 'Your account is banned for unusual activities.',
+        code: 'ACCOUNT_BANNED',
+      });
+    }
+  }
+  return res.status(status).json(body);
+}
 
 function normalizeWalletAddress(addr) {
   if (!addr) return null;
@@ -143,10 +163,10 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     const { settings } = drip;
 
     if (!settings.enabled) {
-      return res.status(503).json({
+      return denyDrip(res, req, 503, {
         code: 'DRIP_DISABLED',
         message: 'Gas drip is temporarily disabled. Fund a little Base ETH to continue.',
-      });
+      }, { walletAddress: addrLower });
     }
 
     if (!(drip.usd > 0) || drip.usd > HARD_MAX_USD_PER_DRIP) {
@@ -182,11 +202,17 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
         }
       }
       if (!primary || primary !== addrLower) {
-        return res.status(403).json({
-          code: 'PRIMARY_WALLET_ONLY',
-          message:
-            'Gas drip is only available for your primary linked wallet. Set it as primary on your profile, or fund Base ETH yourself.',
-        });
+        return denyDrip(
+          res,
+          req,
+          403,
+          {
+            code: 'PRIMARY_WALLET_ONLY',
+            message:
+              'Gas drip is only available for your primary linked wallet. Set it as primary on your profile, or fund Base ETH yourself.',
+          },
+          { walletAddress: addrLower }
+        );
       }
     }
 
@@ -195,52 +221,82 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     const typeField = lastDripFieldForPlayType(playType);
     const typeGate = dripEligibleFromLast(userDoc[typeField], typeCooldownMs);
     if (!typeGate.eligible) {
-      return res.status(429).json({
-        code: 'DRIP_COOLDOWN',
-        message: `Gas drip for ${playType} is on cooldown. Fund Base ETH or wait until you are eligible again.`,
-        nextEligibleAt: typeGate.nextEligibleAt,
-        remainingMs: typeGate.remainingMs,
-        playType,
-      });
+      return denyDrip(
+        res,
+        req,
+        429,
+        {
+          code: 'DRIP_COOLDOWN',
+          message: `Gas drip for ${playType} is on cooldown. Fund Base ETH or wait until you are eligible again.`,
+          nextEligibleAt: typeGate.nextEligibleAt,
+          remainingMs: typeGate.remainingMs,
+          playType,
+        },
+        { walletAddress: addrLower }
+      );
     }
 
     // Any-drip cooldown (wallet)
     const walletCooldownMs =
-      (Number(settings.walletCooldownHours) || 6) * 60 * 60 * 1000;
+      (Number(settings.walletCooldownHours) || 24) * 60 * 60 * 1000;
     const walletGate = dripEligibleFromLast(link.lastGasDripAt, walletCooldownMs);
     if (!walletGate.eligible) {
-      return res.status(429).json({
-        code: 'DRIP_COOLDOWN',
-        message:
-          'This wallet recently received a gas drip. Fund Base ETH or wait before requesting again.',
-        nextEligibleAt: walletGate.nextEligibleAt,
-        remainingMs: walletGate.remainingMs,
-        playType,
-      });
+      return denyDrip(
+        res,
+        req,
+        429,
+        {
+          code: 'DRIP_COOLDOWN',
+          message:
+            'This wallet recently received a gas drip. Fund Base ETH or wait before requesting again.',
+          nextEligibleAt: walletGate.nextEligibleAt,
+          remainingMs: walletGate.remainingMs,
+          playType,
+        },
+        { walletAddress: addrLower }
+      );
     }
 
     // Daily caps
     const usage = await getDailyUsage({ userId: req.user._id, walletLower: addrLower });
     if (usage.userCount >= settings.maxDripsPerUserPerDay) {
-      return res.status(429).json({
-        code: 'DRIP_DAILY_CAP',
-        message: 'Daily gas drip limit reached for your account. Fund Base ETH to continue.',
-        playType,
-      });
+      return denyDrip(
+        res,
+        req,
+        429,
+        {
+          code: 'DRIP_DAILY_CAP',
+          message: 'Daily gas drip limit reached for your account. Fund Base ETH to continue.',
+          playType,
+        },
+        { walletAddress: addrLower }
+      );
     }
     if (usage.walletCount >= settings.maxDripsPerWalletPerDay) {
-      return res.status(429).json({
-        code: 'DRIP_DAILY_CAP',
-        message: 'Daily gas drip limit reached for this wallet. Fund Base ETH to continue.',
-        playType,
-      });
+      return denyDrip(
+        res,
+        req,
+        429,
+        {
+          code: 'DRIP_DAILY_CAP',
+          message: 'Daily gas drip limit reached for this wallet. Fund Base ETH to continue.',
+          playType,
+        },
+        { walletAddress: addrLower }
+      );
     }
     if (usage.userUsd + drip.usd > settings.maxUsdPerUserPerDay + 1e-9) {
-      return res.status(429).json({
-        code: 'DRIP_DAILY_CAP',
-        message: 'Daily gas drip USD limit reached. Fund Base ETH to continue.',
-        playType,
-      });
+      return denyDrip(
+        res,
+        req,
+        429,
+        {
+          code: 'DRIP_DAILY_CAP',
+          message: 'Daily gas drip USD limit reached. Fund Base ETH to continue.',
+          playType,
+        },
+        { walletAddress: addrLower }
+      );
     }
 
     const readProvider = getReadJsonRpcProvider();
@@ -408,6 +464,13 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
       ip,
     });
 
+    await noteDripSuccess({
+      userId: req.user._id,
+      walletAddress: addrLower,
+      ip,
+      meta: { playType, txHash: receipt.hash, usd: drip.usd },
+    });
+
     return res.json({
       ok: true,
       sent: true,
@@ -428,20 +491,11 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
 
 router.get('/status', auth, async (req, res) => {
   try {
-    const readProvider = getReadJsonRpcProvider();
-    const writeProvider = getWriteJsonRpcProvider();
-    const relayer = getRelayerWallet(writeProvider);
-    const bal = await readProvider.getBalance(relayer.address);
     const { getGasDripSettings } = require('../services/gasDripSettings');
     const settings = await getGasDripSettings();
-    const drip = await resolveDripAmountWei('market');
     res.json({
-      relayerAddress: relayer.address,
-      balanceWei: bal.toString(),
-      balanceEth: ethers.formatEther(bal),
-      settings,
-      sampleMarketDripEth: drip.eth,
-      ethUsd: drip.ethUsd,
+      enabled: settings.enabled,
+      primaryWalletOnly: settings.primaryWalletOnly,
     });
   } catch (error) {
     const code = error.statusCode || 500;

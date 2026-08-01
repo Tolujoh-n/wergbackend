@@ -27,6 +27,35 @@ const {
   releaseAllStaleJackpotLocks,
   PREDICTION_CLAIM_LOCK_MS,
 } = require('../utils/jackpotClaimLocks');
+const {
+  getJackpotClaimEligibleFrom,
+  isFreeWinEligible,
+  sumEligibleUnclaimedJackpot,
+} = require('../services/jackpotEligibility');
+const { noteJackpotAuth, noteDoubleClaimAttempt } = require('../services/abuseDetection');
+const { createIpRateLimiter } = require('../middleware/ipRateLimit');
+const { getClientIp } = require('../utils/clientIp');
+const { findRecentJackpotWithdrawals } = require('../utils/verifyClaimReceipt');
+
+const jackpotAuthRateLimit = createIpRateLimiter({
+  action: 'jackpot:authorization',
+  limit: 20,
+  windowMs: 60 * 1000,
+  message: 'Too many jackpot claim requests. Please wait a minute.',
+});
+
+/**
+ * Ensure on-chain jackpotBalances equals exactly `amountUsdc` (never re-credit full DB total).
+ */
+async function syncOnChainExactClaimAmount(walletAddress, amountUsdc) {
+  const onChain = await readJackpotBalanceOnChain(walletAddress);
+  const target = Math.max(0, Number(amountUsdc) || 0);
+  if (onChain != null && Math.abs(onChain - target) < 0.000002) {
+    return { synced: false, onChain };
+  }
+  await setJackpotBalanceOnChain(walletAddress, target);
+  return { synced: true, onChain: target };
+}
 
 async function assertWalletLinkedToUser({ userId, walletAddress }) {
   let reqAddr;
@@ -541,12 +570,16 @@ router.get('/items', optionalAuth, async (req, res) => {
 router.get('/user/stats', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    const available = Math.max(0, (user.jackpotBalance || 0));
+    const { total: eligibleUnclaimed } = await sumEligibleUnclaimedJackpot(req.user._id);
+    const available = Math.max(0, Math.min(user.jackpotBalance || 0, eligibleUnclaimed));
+    const cutoff = await getJackpotClaimEligibleFrom();
     res.json({
       jackpotBalance: available,
       jackpotBalancePending: user.jackpotBalancePending || 0,
       jackpotWithdrawn: user.jackpotWithdrawn || 0,
       jackpotWins: user.jackpotWins || 0,
+      eligibleUnclaimed,
+      jackpotClaimEligibleFrom: cutoff ? cutoff.toISOString() : null,
       totalEarned: available + (user.jackpotWithdrawn || 0) + (user.jackpotBalancePending || 0),
     });
   } catch (error) {
@@ -584,13 +617,27 @@ router.post('/claim/:predictionId/release-stale', auth, async (req, res) => {
 
 /**
  * Per-prediction free jackpot claim: reserves DB balance at sign time and checks on-chain cap.
+ * On-chain balance is set to EXACTLY this claim amount (never full DB total) to prevent double-claim.
  */
-router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
+router.post('/claim/:predictionId/authorization', auth, jackpotAuthRateLimit, async (req, res) => {
   let reservedAmount = 0;
   let predictionId = req.params.predictionId;
+  const clientIp = getClientIp(req);
 
   try {
     await releaseAllStaleJackpotLocks(req.user._id, { predictionId: req.params.predictionId });
+
+    const abuse = await noteJackpotAuth({
+      userId: req.user._id,
+      walletAddress: req.body?.walletAddress,
+      ip: clientIp,
+    });
+    if (abuse.banned) {
+      return res.status(403).json({
+        message: 'Your account is banned for unusual activities.',
+        code: 'ACCOUNT_BANNED',
+      });
+    }
 
     const { walletAddress } = req.body || {};
     if (!walletAddress) {
@@ -626,8 +673,26 @@ router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
       return res.status(400).json({ message: 'Prediction did not win' });
     }
     if (prediction.jackpotClaimed) {
+      await noteDoubleClaimAttempt({
+        userId: req.user._id,
+        walletAddress,
+        ip: clientIp,
+        meta: { predictionId: String(prediction._id), reason: 'already_claimed_db' },
+      });
       return res.status(400).json({ message: 'Jackpot already claimed for this win' });
     }
+
+    const cutoff = await getJackpotClaimEligibleFrom();
+    const eligible = await isFreeWinEligible(prediction, cutoff);
+    if (!eligible) {
+      return res.status(400).json({
+        message:
+          'This jackpot win is outside the claim eligibility window set by the platform.',
+        code: 'JACKPOT_OUTSIDE_ELIGIBILITY',
+        jackpotClaimEligibleFrom: cutoff ? cutoff.toISOString() : null,
+      });
+    }
+
     const withdrawAmount = Number(prediction.jackpotPayout) || 0;
     if (!(withdrawAmount > 0)) {
       return res.status(400).json({ message: 'No jackpot payout for this prediction' });
@@ -638,6 +703,27 @@ router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
       userId: req.user._id,
       walletAddress,
     });
+
+    // If this amount was already withdrawn on-chain for this wallet, finalize — do not re-auth.
+    const recent = await findRecentJackpotWithdrawals(reqAddr);
+    const prior = recent.find((r) => Math.abs(Number(r.amountUsdc) - withdrawAmount) <= 0.000002);
+    if (prior && prediction.jackpotClaimInProgress) {
+      try {
+        await finalizeJackpotClaimInDb({
+          userId: req.user._id,
+          predictionId: prediction._id,
+          withdrawAmount,
+          txHash: prior.txHash,
+        });
+        return res.status(400).json({
+          message: 'Jackpot already claimed on-chain for this win',
+          code: 'ALREADY_CLAIMED_ONCHAIN',
+          txHash: prior.txHash,
+        });
+      } catch (_) {
+        /* continue */
+      }
+    }
 
     const userReserved = await User.findOneAndUpdate(
       {
@@ -675,21 +761,22 @@ router.post('/claim/:predictionId/authorization', auth, async (req, res) => {
     );
     if (!predLocked) {
       await rollbackJackpotReservation(req.user._id, prediction._id, withdrawAmount);
+      await noteDoubleClaimAttempt({
+        userId: req.user._id,
+        walletAddress: reqAddr,
+        ip: clientIp,
+        meta: { predictionId: String(prediction._id), reason: 'lock_conflict' },
+      });
       return res.status(409).json({ message: 'Jackpot claim already in progress or completed' });
     }
 
-    const dbTotal =
-      (userReserved.jackpotBalance || 0) + (userReserved.jackpotBalancePending || 0);
-    const onChain = await readJackpotBalanceOnChain(reqAddr);
-    if (onChain == null || onChain + 0.02 < withdrawAmount) {
-      try {
-        await setJackpotBalanceOnChain(reqAddr, dbTotal);
-      } catch (syncErr) {
-        await rollbackJackpotReservation(req.user._id, prediction._id, withdrawAmount);
-        return res.status(503).json({
-          message: syncErr.message || 'Could not sync on-chain jackpot balance',
-        });
-      }
+    try {
+      await syncOnChainExactClaimAmount(reqAddr, withdrawAmount);
+    } catch (syncErr) {
+      await rollbackJackpotReservation(req.user._id, prediction._id, withdrawAmount);
+      return res.status(503).json({
+        message: syncErr.message || 'Could not sync on-chain jackpot balance',
+      });
     }
 
     const amountWei = payoutToWei(withdrawAmount);
@@ -807,18 +894,9 @@ router.post('/claim/:predictionId/confirm', auth, async (req, res) => {
 router.get('/claim-all/summary', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).lean();
-    const preds = await Prediction.find({
-      user: req.user._id,
-      type: 'free',
-      status: 'won',
-      jackpotClaimed: { $ne: true },
-      jackpotPayout: { $gt: 0 },
-    })
-      .select('jackpotPayout jackpotClaimInProgress match poll')
-      .lean();
-
-    const unclaimed = preds.reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
+    const { total: unclaimed, predictions: preds } = await sumEligibleUnclaimedJackpot(req.user._id);
     const gamesWon = preds.length;
+    const cutoff = await getJackpotClaimEligibleFrom();
     const claimedAgg = await Prediction.aggregate([
       {
         $match: {
@@ -839,7 +917,7 @@ router.get('/claim-all/summary', auth, async (req, res) => {
     ]);
 
     res.json({
-      jackpotBalance: Math.max(0, user?.jackpotBalance || 0),
+      jackpotBalance: Math.max(0, Math.min(user?.jackpotBalance || 0, unclaimed)),
       jackpotBalancePending: user?.jackpotBalancePending || 0,
       jackpotWithdrawn: user?.jackpotWithdrawn || 0,
       unclaimedUsdc: Math.round(unclaimed * 1e6) / 1e6,
@@ -849,17 +927,31 @@ router.get('/claim-all/summary', auth, async (req, res) => {
       gamesWonTotal: gamesWon + (claimedAgg[0]?.count || 0),
       canClaimAll: unclaimed > 0 && (user?.jackpotBalance || 0) >= unclaimed - 0.0001,
       predictionIds: preds.map((p) => String(p._id)),
+      jackpotClaimEligibleFrom: cutoff ? cutoff.toISOString() : null,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-router.post('/claim-all/authorization', auth, async (req, res) => {
+router.post('/claim-all/authorization', auth, jackpotAuthRateLimit, async (req, res) => {
   let reservedAmount = 0;
   let lockedIds = [];
+  const clientIp = getClientIp(req);
   try {
     await releaseAllStaleJackpotLocks(req.user._id, {});
+
+    const abuse = await noteJackpotAuth({
+      userId: req.user._id,
+      walletAddress: req.body?.walletAddress,
+      ip: clientIp,
+    });
+    if (abuse.banned) {
+      return res.status(403).json({
+        message: 'Your account is banned for unusual activities.',
+        code: 'ACCOUNT_BANNED',
+      });
+    }
 
     const { walletAddress } = req.body || {};
     if (!walletAddress) {
@@ -881,6 +973,9 @@ router.post('/claim-all/authorization', auth, async (req, res) => {
       return res.status(500).json({ message: 'CONTRACT_ADDRESS not configured on server' });
     }
 
+    const { predictions: eligiblePreds } = await sumEligibleUnclaimedJackpot(req.user._id);
+    const eligibleIds = new Set(eligiblePreds.map((p) => String(p._id)));
+
     const preds = await Prediction.find({
       user: req.user._id,
       type: 'free',
@@ -897,16 +992,19 @@ router.post('/claim-all/authorization', auth, async (req, res) => {
       ],
     }).select('_id jackpotPayout');
 
-    if (!preds.length) {
-      return res.status(400).json({ message: 'No unclaimed free jackpot wins' });
+    const filtered = preds.filter((p) => eligibleIds.has(String(p._id)));
+    if (!filtered.length) {
+      return res.status(400).json({
+        message: 'No unclaimed free jackpot wins in the eligibility window',
+      });
     }
 
-    const withdrawAmount = preds.reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
+    const withdrawAmount = filtered.reduce((s, p) => s + (Number(p.jackpotPayout) || 0), 0);
     if (!(withdrawAmount > 0)) {
       return res.status(400).json({ message: 'No jackpot amount to claim' });
     }
     reservedAmount = withdrawAmount;
-    lockedIds = preds.map((p) => p._id);
+    lockedIds = filtered.map((p) => p._id);
 
     const reqAddr = await assertWalletLinkedToUser({
       userId: req.user._id,
@@ -940,18 +1038,13 @@ router.post('/claim-all/authorization', auth, async (req, res) => {
       return res.status(409).json({ message: 'Could not lock jackpot claims — try again' });
     }
 
-    const dbTotal =
-      (userReserved.jackpotBalance || 0) + (userReserved.jackpotBalancePending || 0);
-    const onChain = await readJackpotBalanceOnChain(reqAddr);
-    if (onChain == null || onChain + 0.02 < withdrawAmount) {
-      try {
-        await setJackpotBalanceOnChain(reqAddr, dbTotal);
-      } catch (syncErr) {
-        await rollbackBatchJackpotReservation(req.user._id, lockedIds, withdrawAmount);
-        return res.status(503).json({
-          message: syncErr.message || 'Could not sync on-chain jackpot balance',
-        });
-      }
+    try {
+      await syncOnChainExactClaimAmount(reqAddr, withdrawAmount);
+    } catch (syncErr) {
+      await rollbackBatchJackpotReservation(req.user._id, lockedIds, withdrawAmount);
+      return res.status(503).json({
+        message: syncErr.message || 'Could not sync on-chain jackpot balance',
+      });
     }
 
     const amountWei = payoutToWei(withdrawAmount);

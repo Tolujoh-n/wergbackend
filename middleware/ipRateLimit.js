@@ -50,10 +50,42 @@ const walletLoginRateLimit = createIpRateLimiter({
   message: 'Too many wallet login attempts. Please try again in a minute.',
 });
 
+const walletChallengeRateLimit = createIpRateLimiter({
+  action: 'auth:wallet-challenge',
+  limit: 30,
+  windowMs: 60 * 1000,
+  message: 'Too many wallet challenge requests. Please wait a minute.',
+});
+
+const passwordResetRateLimit = createIpRateLimiter({
+  action: 'auth:password-reset',
+  limit: 10,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many password reset requests. Please try again later.',
+});
+
+const googleAuthRateLimit = createIpRateLimiter({
+  action: 'auth:google',
+  limit: 20,
+  windowMs: 60 * 1000,
+  message: 'Too many Google sign-in attempts. Please wait a minute.',
+});
+
+const vaultWithdrawAuthRateLimit = createIpRateLimiter({
+  action: 'orderbook:vault-withdraw-auth',
+  limit: 20,
+  windowMs: 60 * 1000,
+  message: 'Too many vault withdraw requests. Please wait a minute.',
+});
+
 module.exports = {
   loginRateLimit,
   signupRateLimit,
   walletSignupRateLimit,
   walletLoginRateLimit,
+  walletChallengeRateLimit,
+  passwordResetRateLimit,
+  googleAuthRateLimit,
+  vaultWithdrawAuthRateLimit,
   createIpRateLimiter,
 };

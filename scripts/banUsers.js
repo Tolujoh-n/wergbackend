@@ -20,9 +20,17 @@ const DRY_RUN = args.includes('--dry-run');
 const UNBAN = args.includes('--unban');
 const FILE_FLAG_INDEX = args.indexOf('--file');
 const filePath = FILE_FLAG_INDEX >= 0 ? args[FILE_FLAG_INDEX + 1] : null;
+const REASON_FLAG_INDEX = args.indexOf('--reason');
+const banReason =
+  REASON_FLAG_INDEX >= 0
+    ? String(args[REASON_FLAG_INDEX + 1] || '').trim()
+    : 'Auto/security: drip abuse or jackpot claim cluster';
 
 const identifiers = args.filter(
-  (a) => !a.startsWith('--') && a !== filePath
+  (a, i) =>
+    !a.startsWith('--') &&
+    a !== filePath &&
+    !(REASON_FLAG_INDEX >= 0 && (i === REASON_FLAG_INDEX || i === REASON_FLAG_INDEX + 1))
 );
 
 if (filePath) {
@@ -73,12 +81,12 @@ async function main() {
         await unbanUserById(user._id);
         console.log(`✓ Unbanned: ${user.username} (${user._id})`);
       } else {
-        const result = await banUserById(user._id);
+        const result = await banUserById(user._id, { reason: banReason });
         if (result.alreadyBanned) {
           console.log(`• Already banned: ${user.username} (${user._id})`);
           skipped += 1;
         } else {
-          console.log(`✓ Banned: ${user.username} (${user._id})`);
+          console.log(`✓ Banned: ${user.username} (${user._id}) — ${banReason}`);
           ok += 1;
         }
         continue;

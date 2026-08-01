@@ -1,31 +1,31 @@
 const { ethers } = require('ethers');
 const Settings = require('../models/Settings');
 
-/** Absolute ceiling — admin cannot configure a single drip above this (USD). */
-const HARD_MAX_USD_PER_DRIP = 0.5;
-
 const DEFAULT_GAS_DRIP = {
   enabled: true,
-  freeUsd: 0.1,
-  boostUsd: 0.2,
-  marketUsd: 0.25,
+  freeUsd: 0.08,
+  boostUsd: 0.1,
+  marketUsd: 0.12,
   freeCooldownDays: 7,
   /** Hours between boost drips (per user + per wallet). */
   boostCooldownHours: 24,
   /** Hours between market drips (per user + per wallet). */
   marketCooldownHours: 24,
   /** Minimum hours between ANY drip to the same wallet (all play types). */
-  walletCooldownHours: 6,
+  walletCooldownHours: 24,
   /** Max successful drips per user per UTC day (all types combined). */
-  maxDripsPerUserPerDay: 3,
+  maxDripsPerUserPerDay: 2,
   /** Max successful drips per wallet per UTC day. */
-  maxDripsPerWalletPerDay: 2,
+  maxDripsPerWalletPerDay: 1,
   /** Max USD worth dripped per user per UTC day. */
-  maxUsdPerUserPerDay: 0.75,
+  maxUsdPerUserPerDay: 0.3,
   /** Only drip to the user's primary User.walletAddress (blocks multi-wallet farming). */
   primaryWalletOnly: true,
   ethUsdFallback: 3000,
 };
+
+/** Absolute ceiling — admin cannot configure a single drip above this (USD). */
+const HARD_MAX_USD_PER_DRIP = 0.15;
 
 function clampUsd(n, fallback) {
   const v = Number(n);

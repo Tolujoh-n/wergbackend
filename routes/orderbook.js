@@ -28,6 +28,7 @@ const {
   withOrderbookContractOrLegacyForUser,
 } = require('../utils/orderbookUserScope');
 const WalletLink = require('../models/WalletLink');
+const { vaultWithdrawAuthRateLimit } = require('../middleware/ipRateLimit');
 
 const router = express.Router();
 
@@ -118,11 +119,20 @@ router.get('/vault', auth, async (req, res) => {
   }
 });
 
-router.post('/vault/withdraw-auth', auth, async (req, res) => {
+router.post('/vault/withdraw-auth', auth, vaultWithdrawAuthRateLimit, async (req, res) => {
   try {
     const { walletAddress, amountUsdc } = req.body || {};
     const w = normWallet(walletAddress);
     if (!w) return res.status(400).json({ message: 'Invalid walletAddress' });
+    const link = await WalletLink.findOne({
+      walletAddress: w.toLowerCase(),
+      user: req.user._id,
+    }).lean();
+    if (!link) {
+      return res.status(403).json({
+        message: 'Connect the wallet linked to your profile',
+      });
+    }
     const amt = parseFloat(amountUsdc);
     if (!Number.isFinite(amt) || amt <= 0) {
       return res.status(400).json({ message: 'Invalid amountUsdc' });

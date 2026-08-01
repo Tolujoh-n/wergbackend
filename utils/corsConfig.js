@@ -28,7 +28,8 @@ function parseEnvOrigins() {
 function hostnameAllowed(hostname) {
   if (!hostname) return false;
   const h = hostname.toLowerCase();
-  return h === 'wergame.io' || h.endsWith('.wergame.io') || h.endsWith('.vercel.app');
+  // Prod domains only — optional extra Vercel previews via CORS_ORIGINS env (exact origins).
+  return h === 'wergame.io' || h.endsWith('.wergame.io');
 }
 
 function isAllowedOrigin(origin) {

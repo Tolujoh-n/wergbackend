@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
+const helmet = require('helmet');
 
 dotenv.config();
 
@@ -29,10 +30,16 @@ const app = express();
 
 app.set('trust proxy', 1);
 
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  })
+);
 app.use(applyCorsHeaders);
 app.use(cors(corsOptions()));
 app.use(applyCorsHeaders);
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 // Lightweight health checks for uptime monitors / load balancers (no DB hit required).
 const healthHandler = (req, res) => {

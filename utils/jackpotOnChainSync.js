@@ -63,13 +63,16 @@ async function batchSetJackpotBalancesOnChain(entries) {
 }
 
 /**
- * After resolve: set each winner's on-chain jackpotBalances to their DB jackpotBalance.
+ * After resolve: set each winner's on-chain jackpotBalances to eligible unclaimed (+ pending).
  */
 async function syncJackpotBalancesForUsers(userIds) {
   const unique = [...new Set((userIds || []).map((id) => String(id)).filter(Boolean))];
   if (!unique.length) return { synced: 0 };
 
-  const users = await User.find({ _id: { $in: unique } }).select('jackpotBalance').lean();
+  const { sumEligibleUnclaimedJackpot } = require('../services/jackpotEligibility');
+  const users = await User.find({ _id: { $in: unique } })
+    .select('jackpotBalance jackpotBalancePending')
+    .lean();
   const links = await WalletLink.find({ user: { $in: unique } }).lean();
   const walletByUser = new Map(links.map((l) => [String(l.user), l.walletAddress]));
 
@@ -77,11 +80,10 @@ async function syncJackpotBalancesForUsers(userIds) {
   for (const u of users) {
     const w = walletByUser.get(String(u._id));
     if (!w) continue;
+    const { total } = await sumEligibleUnclaimedJackpot(u._id);
     entries.push({
       walletAddress: w,
-      balanceUsdc:
-        Math.max(0, Number(u.jackpotBalance) || 0) +
-        Math.max(0, Number(u.jackpotBalancePending) || 0),
+      balanceUsdc: Math.max(0, total),
     });
   }
   if (!entries.length) return { synced: 0 };

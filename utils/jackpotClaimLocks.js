@@ -159,13 +159,15 @@ async function releaseStaleJackpotPredictionLocks(userId, { predictionId } = {})
   const preds = await Prediction.find(query).lean();
   if (!preds.length) return { released: 0, recovered: false };
 
-  const link = await WalletLink.findOne({ user: userId }).lean();
+  const links = await WalletLink.find({ user: userId }).select('walletAddress').lean();
   let recovered = false;
-  if (link?.walletAddress) {
-    recovered = await tryRecoverStaleJackpotClaims(userId, link.walletAddress);
-    if (recovered) {
-      return { released: 0, recovered: true };
-    }
+  for (const link of links) {
+    if (!link?.walletAddress) continue;
+    const did = await tryRecoverStaleJackpotClaims(userId, link.walletAddress);
+    if (did) recovered = true;
+  }
+  if (recovered) {
+    return { released: 0, recovered: true };
   }
 
   let released = 0;
@@ -174,18 +176,38 @@ async function releaseStaleJackpotPredictionLocks(userId, { predictionId } = {})
     if (age < PREDICTION_CLAIM_LOCK_MS) continue;
 
     const amt = Number(pred.jackpotPayout) || 0;
-    const user = await User.findById(userId).select('jackpotBalancePending').lean();
-    if (user && (user.jackpotBalancePending || 0) >= amt - 0.001 && amt > 0) {
-      await rollbackJackpotReservation(userId, pred._id, amt);
-    } else {
-      await Prediction.updateOne(
-        { _id: pred._id },
-        { $set: { jackpotClaimInProgress: false, jackpotClaimLockedAt: null } }
-      );
+    // Never refund pending if on-chain already shows a matching withdraw (double-claim risk).
+    let chainHit = false;
+    for (const link of links) {
+      if (!link?.walletAddress) continue;
+      const recent = await findRecentJackpotWithdrawals(link.walletAddress);
+      if (recent.some((r) => amountsMatch(r.amountUsdc, amt))) {
+        chainHit = true;
+        try {
+          await finalizeJackpotClaimInDb({
+            userId,
+            predictionId: pred._id,
+            withdrawAmount: amt,
+            txHash: recent.find((r) => amountsMatch(r.amountUsdc, amt))?.txHash,
+          });
+          recovered = true;
+        } catch (e) {
+          console.warn('stale lock finalize:', e?.message || e);
+        }
+        break;
+      }
     }
+    if (chainHit) continue;
+
+    // Do not restore DB balance after a possible on-chain withdraw we couldn't match —
+    // clear in-progress flags only; leave pending for admin/reconcile if needed.
+    await Prediction.updateOne(
+      { _id: pred._id },
+      { $set: { jackpotClaimInProgress: false, jackpotClaimLockedAt: null } }
+    );
     released += 1;
   }
-  return { released, recovered: false };
+  return { released, recovered };
 }
 
 async function releaseStaleJackpotReservation(userId) {
@@ -193,8 +215,9 @@ async function releaseStaleJackpotReservation(userId) {
     'jackpotBalance jackpotBalancePending jackpotWithdrawLockedAt jackpotWithdrawInProgress'
   );
 
-  const link = await WalletLink.findOne({ user: userId }).lean();
-  if (link?.walletAddress) {
+  const links = await WalletLink.find({ user: userId }).select('walletAddress').lean();
+  for (const link of links) {
+    if (!link?.walletAddress) continue;
     const recovered = await tryRecoverStaleJackpotClaims(userId, link.walletAddress);
     if (recovered) {
       await releaseStaleJackpotPredictionLocks(userId);
@@ -205,32 +228,38 @@ async function releaseStaleJackpotReservation(userId) {
   if (user && (user.jackpotBalancePending || 0) > 0) {
     const lockedAt = user.jackpotWithdrawLockedAt;
     if (lockedAt && Date.now() - new Date(lockedAt).getTime() >= JACKPOT_CLAIM_LOCK_MS) {
+      // Prefer clearing the in-progress flag without restoring balance when on-chain
+      // is lower than DB (likely a completed withdraw that never confirmed).
+      const link = links[0];
       if (link?.walletAddress) {
         const onChain = await readJackpotBalanceOnChain(link.walletAddress);
         const dbTotal = (user.jackpotBalance || 0) + (user.jackpotBalancePending || 0);
         if (onChain != null && onChain + 0.02 < dbTotal) {
-          await User.updateOne({ _id: userId }, { $set: { jackpotWithdrawInProgress: false } });
-          console.warn(
-            `jackpot stale lock user ${userId}: on-chain ${onChain} < db ${dbTotal}; skipping pending refund`
-          );
-        } else {
-          const pending = user.jackpotBalancePending;
           await User.updateOne(
             { _id: userId },
             {
-              $inc: { jackpotBalance: pending },
-              $set: { jackpotBalancePending: 0, jackpotWithdrawInProgress: false },
+              $set: {
+                jackpotWithdrawInProgress: false,
+                // Drop pending without refunding — prevents double-claim after chain withdraw.
+                jackpotBalancePending: 0,
+              },
             }
+          );
+          console.warn(
+            `jackpot stale lock user ${userId}: on-chain ${onChain} < db ${dbTotal}; dropped pending (no refund)`
+          );
+        } else {
+          // On-chain still matches — safe to unlock flags only (no balance restore of pending
+          // into spendable until predictions are cleared separately).
+          await User.updateOne(
+            { _id: userId },
+            { $set: { jackpotWithdrawInProgress: false } }
           );
         }
       } else {
-        const pending = user.jackpotBalancePending;
         await User.updateOne(
           { _id: userId },
-          {
-            $inc: { jackpotBalance: pending },
-            $set: { jackpotBalancePending: 0, jackpotWithdrawInProgress: false },
-          }
+          { $set: { jackpotWithdrawInProgress: false } }
         );
       }
       await Prediction.updateMany(

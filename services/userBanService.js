@@ -167,26 +167,47 @@ function emailVerificationLabel(user) {
   return 'unverified';
 }
 
-async function listUsersForAdmin({ page = 1, limit = 20, search = '', verifiedFilter = 'all' }) {
+function buildBannedFilterQuery(bannedFilter) {
+  const filter = String(bannedFilter || 'all').toLowerCase();
+  if (filter === 'banned') return { banned: true };
+  if (filter === 'active' || filter === 'not_banned') return { banned: { $ne: true } };
+  return {};
+}
+
+async function getBanStats(baseQuery = {}) {
+  const [banned, active] = await Promise.all([
+    User.countDocuments({ ...baseQuery, banned: true }),
+    User.countDocuments({ ...baseQuery, banned: { $ne: true } }),
+  ]);
+  return { banned, active, total: banned + active };
+}
+
+async function listUsersForAdmin({
+  page = 1,
+  limit = 20,
+  search = '',
+  verifiedFilter = 'all',
+  bannedFilter = 'all',
+}) {
   const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const safePage = Math.max(1, parseInt(page, 10) || 1);
   const skip = (safePage - 1) * safeLimit;
   const searchQuery = await buildUserSearchQuery(search);
   const verifiedQuery = buildVerifiedFilterQuery(verifiedFilter);
-  const query =
-    Object.keys(searchQuery).length && Object.keys(verifiedQuery).length
-      ? { $and: [searchQuery, verifiedQuery] }
-      : { ...searchQuery, ...verifiedQuery };
+  const bannedQuery = buildBannedFilterQuery(bannedFilter);
+  const parts = [searchQuery, verifiedQuery, bannedQuery].filter((q) => Object.keys(q).length > 0);
+  const query = parts.length === 0 ? {} : parts.length === 1 ? parts[0] : { $and: parts };
 
-  const [users, total, emailStats] = await Promise.all([
+  const [users, total, emailStats, banStats] = await Promise.all([
     User.find(query)
-      .select('username email walletAddress banned bannedAt createdAt role goldenTickets emailVerified emailVerifiedAt phoneVerified')
+      .select('username email walletAddress banned bannedAt bannedReason createdAt role goldenTickets emailVerified emailVerifiedAt phoneVerified')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(safeLimit)
       .lean(),
     User.countDocuments(query),
     getEmailVerificationStats(),
+    getBanStats(),
   ]);
 
   const ids = users.map((u) => u._id);
@@ -218,6 +239,7 @@ async function listUsersForAdmin({ page = 1, limit = 20, search = '', verifiedFi
       linkedWallets: linked,
       banned: Boolean(u.banned),
       bannedAt: u.bannedAt || null,
+      bannedReason: u.bannedReason || '',
       role: u.role,
       goldenTickets: u.goldenTickets ?? 0,
       referralCount: referralMap.get(String(u._id)) || 0,
@@ -235,6 +257,7 @@ async function listUsersForAdmin({ page = 1, limit = 20, search = '', verifiedFi
     limit: safeLimit,
     pages: Math.max(1, Math.ceil(total / safeLimit)),
     emailStats,
+    banStats,
   };
 }
 

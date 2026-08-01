@@ -3,7 +3,9 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WalletLink = require('../models/WalletLink');
 const { auth, optionalAuth } = require('../middleware/auth');
-const { loginRateLimit, signupRateLimit, walletSignupRateLimit, walletLoginRateLimit } = require('../middleware/ipRateLimit');
+const { loginRateLimit, signupRateLimit, walletSignupRateLimit, walletLoginRateLimit, walletChallengeRateLimit, passwordResetRateLimit, googleAuthRateLimit } = require('../middleware/ipRateLimit');
+const { getClientIp } = require('../utils/clientIp');
+const { noteWalletSignup } = require('../services/abuseDetection');
 const { requireTurnstile } = require('../middleware/turnstile');
 const { getJwtSecret } = require('../utils/jwtSecret');
 const {
@@ -285,7 +287,7 @@ router.post('/login', loginRateLimit, requireTurnstile, async (req, res) => {
 });
 
 // Request password reset code (email via SendGrid)
-router.post('/password-reset/request', async (req, res) => {
+router.post('/password-reset/request', passwordResetRateLimit, async (req, res) => {
   try {
     const email = (req.body.email || '').trim();
     if (!email) {
@@ -381,7 +383,7 @@ router.post('/password-reset/confirm', async (req, res) => {
 });
 
 // One-time message for the wallet to sign (proves ownership).
-router.post('/wallet-challenge', optionalAuth, async (req, res) => {
+router.post('/wallet-challenge', optionalAuth, walletChallengeRateLimit, async (req, res) => {
   try {
     const address = req.body?.address || req.body?.walletAddress;
     const purpose = req.body?.purpose === 'link' ? 'link' : 'auth';
@@ -476,6 +478,18 @@ router.post('/wallet-signup', walletSignupRateLimit, async (req, res) => {
     await user.save();
     await WalletLink.create({ walletAddress, user: user._id });
     await applyReferralIfPresent({ referralCode, userId: user._id, isNewUser: true });
+
+    const abuse = await noteWalletSignup({
+      userId: user._id,
+      ip: getClientIp(req),
+      walletAddress,
+    });
+    if (abuse.banned) {
+      return res.status(403).json({
+        message: 'Your account is banned for unusual activities.',
+        code: 'ACCOUNT_BANNED',
+      });
+    }
 
     const token = generateToken(user._id);
     await touchLoginStreak(user._id);
@@ -634,7 +648,7 @@ router.post('/wallets/unlink', auth, async (req, res) => {
 });
 
 // Google OAuth (ID token from frontend)
-router.post('/google', async (req, res) => {
+router.post('/google', googleAuthRateLimit, async (req, res) => {
   try {
     const { credential, referralCode } = req.body;
     if (!credential) return res.status(400).json({ message: 'Google credential required' });

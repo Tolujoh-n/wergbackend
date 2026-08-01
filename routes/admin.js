@@ -2043,6 +2043,53 @@ router.post('/settings/maxLinkedWallets', async (req, res) => {
   }
 });
 
+router.get('/settings/jackpotClaimEligibleFrom', async (req, res) => {
+  try {
+    const { getJackpotClaimEligibleFrom } = require('../services/jackpotEligibility');
+    const d = await getJackpotClaimEligibleFrom();
+    res.json({ date: d ? d.toISOString().slice(0, 10) : null, iso: d ? d.toISOString() : null });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/settings/jackpotClaimEligibleFrom', async (req, res) => {
+  try {
+    const {
+      setJackpotClaimEligibleFrom,
+      recalculateAllJackpotBalances,
+    } = require('../services/jackpotEligibility');
+    const raw = req.body?.date ?? req.body?.value ?? null;
+    const d = await setJackpotClaimEligibleFrom(raw === '' ? null : raw);
+    let recalc = null;
+    if (req.body?.recalculate !== false) {
+      recalc = await recalculateAllJackpotBalances({
+        syncOnChain: !!req.body?.syncOnChain,
+      });
+    }
+    res.json({
+      date: d ? d.toISOString().slice(0, 10) : null,
+      iso: d ? d.toISOString() : null,
+      recalc,
+    });
+  } catch (error) {
+    const code = error.statusCode || 500;
+    res.status(code).json({ message: error.message });
+  }
+});
+
+router.post('/settings/jackpotClaimEligibleFrom/recalculate', async (req, res) => {
+  try {
+    const { recalculateAllJackpotBalances } = require('../services/jackpotEligibility');
+    const recalc = await recalculateAllJackpotBalances({
+      syncOnChain: !!req.body?.syncOnChain,
+    });
+    res.json(recalc);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Settings Management (generic key — register AFTER specific /settings/* routes)
 router.get('/settings/:key', async (req, res) => {
   try {
@@ -2118,6 +2165,7 @@ router.get('/users', async (req, res) => {
       limit: req.query.limit,
       search: req.query.search,
       verifiedFilter: req.query.verifiedFilter,
+      bannedFilter: req.query.bannedFilter,
     });
     res.json(data);
   } catch (error) {
