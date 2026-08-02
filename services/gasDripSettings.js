@@ -21,6 +21,13 @@ const DEFAULT_GAS_DRIP = {
   maxUsdPerUserPerDay: 0.3,
   /** Only drip to the user's primary User.walletAddress (blocks multi-wallet farming). */
   primaryWalletOnly: true,
+  /**
+   * User must hold at least this much claimable Free jackpot (USDC) before any gas drip.
+   * Admin-configurable; default $2.
+   */
+  minJackpotUsdForDrip: 2,
+  /** Reject drips for accounts newer than this (minutes). */
+  minAccountAgeMinutes: 60,
   ethUsdFallback: 3000,
 };
 
@@ -66,6 +73,14 @@ function normalizeGasDripSettings(raw) {
       Math.min(5, Number(v.maxUsdPerUserPerDay) || DEFAULT_GAS_DRIP.maxUsdPerUserPerDay)
     ),
     primaryWalletOnly: v.primaryWalletOnly !== false && v.primaryWalletOnly !== 'false',
+    minJackpotUsdForDrip: Math.max(
+      0,
+      Math.min(1000, Number(v.minJackpotUsdForDrip) || DEFAULT_GAS_DRIP.minJackpotUsdForDrip)
+    ),
+    minAccountAgeMinutes: Math.max(
+      0,
+      Math.min(10080, parseInt(v.minAccountAgeMinutes, 10) || DEFAULT_GAS_DRIP.minAccountAgeMinutes)
+    ),
     ethUsdFallback: Math.max(1, Number(v.ethUsdFallback) || DEFAULT_GAS_DRIP.ethUsdFallback),
   };
 }
@@ -84,7 +99,7 @@ async function setGasDripSettings(partial) {
       $set: {
         value: next,
         description:
-          'Relayer gas drip: USD amounts, cooldowns (all play types), daily caps, kill switch',
+          'Relayer gas drip: USD amounts, cooldowns, daily caps, min jackpot for drip, kill switch',
         updatedAt: new Date(),
       },
       $setOnInsert: { key: 'gasDripSettings' },

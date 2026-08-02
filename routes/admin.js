@@ -2015,6 +2015,8 @@ router.post('/settings/gasDripSettings', async (req, res) => {
       maxDripsPerWalletPerDay: req.body.maxDripsPerWalletPerDay,
       maxUsdPerUserPerDay: req.body.maxUsdPerUserPerDay,
       primaryWalletOnly: req.body.primaryWalletOnly,
+      minJackpotUsdForDrip: req.body.minJackpotUsdForDrip,
+      minAccountAgeMinutes: req.body.minAccountAgeMinutes,
       ethUsdFallback: req.body.ethUsdFallback,
     });
     res.json({ settings });

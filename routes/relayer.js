@@ -21,15 +21,48 @@ const router = express.Router();
 
 const gasDripRateLimit = createIpRateLimiter({
   action: 'relayer:gasdrip',
-  limit: 8,
+  limit: 3,
   windowMs: 60 * 1000,
   message: 'Too many gas drip requests. Please wait a minute.',
 });
 
+const gasDripUserRateLimit = async (req, res, next) => {
+  try {
+    const uid = String(req.user?._id || req.params?.userId || '');
+    if (!uid) return next();
+    const { consumeRateLimit } = require('../services/ipRateLimitService');
+    await consumeRateLimit({
+      key: `relayer:gasdrip:user:${uid}`,
+      limit: 3,
+      windowMs: 60 * 1000,
+    });
+    return next();
+  } catch (e) {
+    if (e.message === 'RATE_LIMIT_EXCEEDED') {
+      return res.status(429).json({
+        message: 'Too many gas drip requests for this account. Please wait a minute.',
+        code: 'RATE_LIMIT_EXCEEDED',
+        retryAfterSeconds: e.retryAfterSeconds,
+      });
+    }
+    return next(e);
+  }
+};
+
 const LOCK_MS = 120 * 1000;
 
 async function denyDrip(res, req, status, body, { walletAddress } = {}) {
-  if (status === 429 || body?.code === 'PRIMARY_WALLET_ONLY') {
+  const abuseCodes = new Set([
+    'PRIMARY_WALLET_ONLY',
+    'JACKPOT_MIN_NOT_MET',
+    'ACCOUNT_TOO_NEW',
+    'USER_MISMATCH',
+    'DRIP_COOLDOWN',
+    'DRIP_DAILY_CAP',
+    'DRIP_BUSY',
+    'DRIP_DISABLED',
+  ]);
+  if (status === 429 || abuseCodes.has(body?.code)) {
     const ban = await noteDripDenial({
       userId: req.user?._id,
       walletAddress: walletAddress || req.body?.walletAddress,
@@ -133,18 +166,36 @@ async function getDailyUsage({ userId, walletLower }) {
 }
 
 /**
- * Gas-drip endpoint: if user has low Base ETH, backend sends a small amount for gas.
- * Hardened: kill switch, cooldowns on ALL play types, daily caps, primary-wallet-only,
- * atomic locks (user + wallet), IP rate limit, audit log.
+ * Gas-drip endpoint (user-bound): POST /relayer/users/:userId/gasdrip
+ * Requires JWT for that exact userId + linked wallet + min free-jackpot balance.
  */
-router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
+async function handleGasDrip(req, res) {
   const ip = getClientIp(req);
   let userLockHeld = false;
   let walletLockHeld = false;
   let addrLower = null;
-  let userId = req.user?._id;
 
   try {
+    const pathUserId = String(req.params.userId || '').trim();
+    const bodyUserId = String(req.body?.userId || '').trim();
+    const authUserId = String(req.user?._id || '');
+
+    if (!authUserId) {
+      return res.status(401).json({ message: 'Login required', code: 'AUTH_REQUIRED' });
+    }
+    if (!pathUserId || pathUserId !== authUserId) {
+      return res.status(403).json({
+        message: 'Relayer user id does not match the logged-in account',
+        code: 'USER_MISMATCH',
+      });
+    }
+    if (bodyUserId && bodyUserId !== authUserId) {
+      return res.status(403).json({
+        message: 'Relayer user id does not match the logged-in account',
+        code: 'USER_MISMATCH',
+      });
+    }
+
     const { walletAddress } = req.body || {};
     const playType = normalizePlayType(req.body?.playType || req.body?.label);
     if (!walletAddress) {
@@ -177,27 +228,94 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     if (!link) {
       return res.status(400).json({ message: 'Link a wallet to your account' });
     }
-    if (String(link.user) !== String(req.user._id)) {
+    if (String(link.user) !== authUserId) {
       return res.status(403).json({ message: 'Connect the wallet linked to your profile' });
     }
 
-    const userDoc = await User.findById(req.user._id)
+    const userDoc = await User.findById(authUserId)
       .select(
-        'walletAddress lastFreeGasDripAt lastBoostGasDripAt lastMarketGasDripAt gasDripLockUntil banned'
+        'walletAddress lastFreeGasDripAt lastBoostGasDripAt lastMarketGasDripAt gasDripLockUntil banned createdAt jackpotBalance role'
       )
       .lean();
     if (!userDoc || userDoc.banned) {
       return res.status(403).json({ message: 'Account not eligible for gas drip' });
     }
+    if (userDoc.role === 'admin' || userDoc.role === 'superAdmin') {
+      // Admins can still drip for testing — no extra block
+    }
+
+    const minAgeMs = (Number(settings.minAccountAgeMinutes) || 0) * 60 * 1000;
+    if (minAgeMs > 0 && userDoc.createdAt) {
+      const age = Date.now() - new Date(userDoc.createdAt).getTime();
+      if (age < minAgeMs) {
+        return denyDrip(
+          res,
+          req,
+          403,
+          {
+            code: 'ACCOUNT_TOO_NEW',
+            message:
+              'Your account is too new to use gas drip. Fund a little Base ETH, or try again later.',
+            minAccountAgeMinutes: settings.minAccountAgeMinutes,
+          },
+          { walletAddress: addrLower }
+        );
+      }
+    }
+
+    const minJackpot = Number(settings.minJackpotUsdForDrip) || 0;
+    if (minJackpot > 0) {
+      const { sumEligibleUnclaimedJackpot } = require('../services/jackpotEligibility');
+      const { total: eligibleJackpot } = await sumEligibleUnclaimedJackpot(authUserId);
+      const dbBalance = Math.max(0, Number(userDoc.jackpotBalance) || 0);
+      const held = Math.min(eligibleJackpot, dbBalance > 0 ? dbBalance : eligibleJackpot);
+      const claimable = Math.max(eligibleJackpot, 0);
+      if (claimable + 1e-9 < minJackpot) {
+        return denyDrip(
+          res,
+          req,
+          403,
+          {
+            code: 'JACKPOT_MIN_NOT_MET',
+            message: `Gas drip requires at least $${minJackpot.toFixed(2)} claimable Free jackpot. Accumulate more wins, or fund Base ETH yourself to claim smaller amounts.`,
+            minJackpotUsd: minJackpot,
+            claimableJackpotUsd: Math.round(claimable * 1e6) / 1e6,
+            heldJackpotUsd: Math.round(held * 1e6) / 1e6,
+          },
+          { walletAddress: addrLower }
+        );
+      }
+
+      // If client declares a claim amount below the min, block drip (must self-fund ETH).
+      const claimAmtRaw = req.body?.claimAmountUsdc;
+      if (claimAmtRaw != null && claimAmtRaw !== '') {
+        const claimAmt = Number(claimAmtRaw);
+        if (Number.isFinite(claimAmt) && claimAmt >= 0 && claimAmt + 1e-9 < minJackpot) {
+          return denyDrip(
+            res,
+            req,
+            403,
+            {
+              code: 'JACKPOT_MIN_NOT_MET',
+              message: `This claim is under $${minJackpot.toFixed(2)}. Fund Base ETH to claim smaller amounts, or accumulate at least $${minJackpot.toFixed(2)} Free jackpot to use platform gas drip.`,
+              minJackpotUsd: minJackpot,
+              claimableJackpotUsd: Math.round(claimable * 1e6) / 1e6,
+              claimAmountUsdc: Math.round(claimAmt * 1e6) / 1e6,
+            },
+            { walletAddress: addrLower }
+          );
+        }
+      }
+    }
 
     if (settings.primaryWalletOnly) {
       let primary = normalizeWalletAddress(userDoc.walletAddress);
       if (!primary) {
-        const links = await WalletLink.find({ user: req.user._id }).select('walletAddress').lean();
+        const links = await WalletLink.find({ user: authUserId }).select('walletAddress').lean();
         if (links.length === 1) {
           primary = normalizeWalletAddress(links[0].walletAddress);
           if (primary) {
-            await User.updateOne({ _id: req.user._id }, { $set: { walletAddress: primary } });
+            await User.updateOne({ _id: authUserId }, { $set: { walletAddress: primary } });
           }
         }
       }
@@ -258,7 +376,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     }
 
     // Daily caps
-    const usage = await getDailyUsage({ userId: req.user._id, walletLower: addrLower });
+    const usage = await getDailyUsage({ userId: authUserId, walletLower: addrLower });
     if (usage.userCount >= settings.maxDripsPerUserPerDay) {
       return denyDrip(
         res,
@@ -320,6 +438,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
         sent: false,
         message: 'Wallet already has sufficient gas balance',
         walletAddress: checksum,
+        userId: authUserId,
         balanceWei: currentBal.toString(),
         playType,
       });
@@ -328,10 +447,9 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     const now = new Date();
     const lockUntil = new Date(now.getTime() + LOCK_MS);
 
-    // Atomic user lock (prevents parallel drain)
     const userLocked = await User.findOneAndUpdate(
       {
-        _id: req.user._id,
+        _id: authUserId,
         $or: [
           { gasDripLockUntil: { $exists: false } },
           { gasDripLockUntil: null },
@@ -349,11 +467,10 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     }
     userLockHeld = true;
 
-    // Atomic wallet lock
     const walletLocked = await WalletLink.findOneAndUpdate(
       {
         walletAddress: addrLower,
-        user: req.user._id,
+        user: authUserId,
         $or: [
           { gasDripLockUntil: { $exists: false } },
           { gasDripLockUntil: null },
@@ -364,7 +481,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
       { new: true }
     );
     if (!walletLocked) {
-      await clearUserDripLock(req.user._id);
+      await clearUserDripLock(authUserId);
       userLockHeld = false;
       return res.status(429).json({
         code: 'DRIP_BUSY',
@@ -373,10 +490,9 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     }
     walletLockHeld = true;
 
-    // Re-check balance under lock (race: another drip may have landed)
     const balUnderLock = await readProvider.getBalance(checksum);
     if (balUnderLock >= drip.minBalanceWei) {
-      await clearUserDripLock(req.user._id);
+      await clearUserDripLock(authUserId);
       await clearWalletDripLock(addrLower);
       userLockHeld = false;
       walletLockHeld = false;
@@ -385,6 +501,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
         sent: false,
         message: 'Wallet already has sufficient gas balance',
         walletAddress: checksum,
+        userId: authUserId,
         balanceWei: balUnderLock.toString(),
         playType,
       });
@@ -392,10 +509,9 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
 
     const relayer = getRelayerWallet(writeProvider);
     const relayerBal = await readProvider.getBalance(relayer.address);
-    // Keep a small reserve so the relayer can still pay its own gas
     const reserveWei = ethers.parseEther('0.00005');
     if (relayerBal < drip.amountWei + reserveWei) {
-      await clearUserDripLock(req.user._id);
+      await clearUserDripLock(authUserId);
       await clearWalletDripLock(addrLower);
       userLockHeld = false;
       walletLockHeld = false;
@@ -403,7 +519,6 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
         code: 'RELAYER_OUT_OF_GAS',
         message:
           'Relayer has no fund to drip gas. Get a little Base ETH to process transactions — they need a small amount of ETH to pay gas.',
-        relayerAddress: relayer.address,
         playType,
       });
     }
@@ -417,7 +532,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
       receipt = await tx.wait();
     } catch (sendErr) {
       await GasDripLog.create({
-        user: req.user._id,
+        user: authUserId,
         walletAddress: addrLower,
         playType,
         amountWei: drip.amountWei.toString(),
@@ -430,9 +545,8 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
       throw sendErr;
     }
 
-    // Record cooldowns only after successful send
     await User.updateOne(
-      { _id: req.user._id },
+      { _id: authUserId },
       {
         $set: {
           [typeField]: new Date(),
@@ -453,7 +567,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     walletLockHeld = false;
 
     await GasDripLog.create({
-      user: req.user._id,
+      user: authUserId,
       walletAddress: addrLower,
       playType,
       amountWei: drip.amountWei.toString(),
@@ -465,7 +579,7 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
     });
 
     await noteDripSuccess({
-      userId: req.user._id,
+      userId: authUserId,
       walletAddress: addrLower,
       ip,
       meta: { playType, txHash: receipt.hash, usd: drip.usd },
@@ -476,16 +590,62 @@ router.post('/gasdrip', auth, gasDripRateLimit, async (req, res) => {
       sent: true,
       txHash: receipt.hash,
       walletAddress: checksum,
+      userId: authUserId,
       amountWei: drip.amountWei.toString(),
       amountEth: drip.eth,
-      amountUsdApprox: drip.usd,
+      amountUsd: drip.usd,
       playType,
     });
   } catch (error) {
-    if (userLockHeld && userId) await clearUserDripLock(userId);
+    if (userLockHeld && req.user?._id) await clearUserDripLock(req.user._id);
     if (walletLockHeld && addrLower) await clearWalletDripLock(addrLower);
+    console.error('gasdrip:', error);
     const code = error.statusCode || 500;
     res.status(code).json({ message: error.message || 'Gasdrip failed' });
+  }
+}
+
+/** Legacy path — disabled (must use user-bound URL). */
+router.post('/gasdrip', auth, (req, res) => {
+  res.status(410).json({
+    code: 'RELAYER_PATH_DEPRECATED',
+    message:
+      'Use POST /api/relayer/users/:userId/gasdrip with your logged-in user id. Legacy /gasdrip is disabled.',
+  });
+});
+
+router.post(
+  '/users/:userId/gasdrip',
+  auth,
+  gasDripRateLimit,
+  gasDripUserRateLimit,
+  handleGasDrip
+);
+
+router.get('/users/:userId/status', auth, async (req, res) => {
+  try {
+    const pathUserId = String(req.params.userId || '').trim();
+    const authUserId = String(req.user?._id || '');
+    if (!pathUserId || pathUserId !== authUserId) {
+      return res.status(403).json({ message: 'User mismatch', code: 'USER_MISMATCH' });
+    }
+    const { getGasDripSettings } = require('../services/gasDripSettings');
+    const { sumEligibleUnclaimedJackpot } = require('../services/jackpotEligibility');
+    const settings = await getGasDripSettings();
+    const { total: claimableJackpotUsd } = await sumEligibleUnclaimedJackpot(authUserId);
+    const minJackpotUsd = Number(settings.minJackpotUsdForDrip) || 0;
+    res.json({
+      userId: authUserId,
+      enabled: settings.enabled,
+      primaryWalletOnly: settings.primaryWalletOnly,
+      minJackpotUsdForDrip: minJackpotUsd,
+      minAccountAgeMinutes: settings.minAccountAgeMinutes,
+      claimableJackpotUsd: Math.round(claimableJackpotUsd * 1e6) / 1e6,
+      dripEligibleByJackpot: claimableJackpotUsd + 1e-9 >= minJackpotUsd,
+    });
+  } catch (error) {
+    const code = error.statusCode || 500;
+    res.status(code).json({ message: error.message || 'Relayer status failed' });
   }
 });
 
@@ -496,6 +656,8 @@ router.get('/status', auth, async (req, res) => {
     res.json({
       enabled: settings.enabled,
       primaryWalletOnly: settings.primaryWalletOnly,
+      minJackpotUsdForDrip: settings.minJackpotUsdForDrip,
+      usePath: `/api/relayer/users/${req.user._id}/gasdrip`,
     });
   } catch (error) {
     const code = error.statusCode || 500;
